@@ -1,0 +1,17 @@
+# Dependencias y artefactos de compilacion
+node_modules/
+dist/
+build/
+coverage/
+
+# Entorno y logs
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+Thumbs.db
+
+# Permitir explicitamente documentacion tecnica oficial
+!docs/
+!docs/**

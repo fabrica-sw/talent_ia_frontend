@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es" class="notranslate" translate="no">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="google" content="notranslate" />
+    <title>EAS Consulting | TalentCore AI™</title>
+    <!-- High-Fidelity brand favicon from symbol -->
+    <link rel="icon" type="image/png" href="/favicon.png?v=4" />
+    <script>
+      window.addEventListener('error', function(e) {
+        var box = document.getElementById('boot-error') || document.createElement('div');
+        box.id = 'boot-error';
+        box.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:#fff1f2;border:2px solid #e11d48;color:#9f1239;padding:16px;border-radius:12px;font-family:monospace;font-size:12px;z-index:999999;box-shadow:0 10px 25px rgba(0,0,0,0.2);white-space:pre-wrap;';
+        box.innerHTML = '<strong>[Error de Ejecución]:</strong> ' + (e.message || e) + '\n<strong>Archivo:</strong> ' + (e.filename || 'desconocido') + ':' + (e.lineno || 0);
+        document.body.appendChild(box);
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var box = document.getElementById('boot-error') || document.createElement('div');
+        box.id = 'boot-error';
+        box.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:#fff1f2;border:2px solid #e11d48;color:#9f1239;padding:16px;border-radius:12px;font-family:monospace;font-size:12px;z-index:999999;box-shadow:0 10px 25px rgba(0,0,0,0.2);white-space:pre-wrap;';
+        box.innerHTML = '<strong>[Error en Promesa]:</strong> ' + (e.reason && e.reason.stack ? e.reason.stack : (e.reason || 'Rechazo sin detalle'));
+        document.body.appendChild(box);
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <div id="boot-loader" style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#103268;background:#f8fafc;">
+        <div style="text-align:center;padding:24px;">
+          <div style="font-size:22px;font-weight:900;letter-spacing:-0.5px;color:#103268;margin-bottom:6px;">EAS TalentCore AI™</div>
+          <div style="font-size:12px;color:#64748b;font-weight:600;">Iniciando plataforma corporativa...</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
