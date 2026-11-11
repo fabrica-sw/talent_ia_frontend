@@ -51,15 +51,15 @@ talent_ia_frontend/
 |   \-- favicon.png                     # Isotipo en alta resolución
 |-- src/
 |   |-- App.tsx                         # Orquestador principal, router de vistas y login
-|   |-- api.ts                          # Cliente HTTP centralizado (authFetch, manejo 401)
+|   |-- api.ts                          # Cliente HTTP authFetch (revertEvaluationNote, submitFeedback, 401)
 |   |-- index.css                       # Directivas Tailwind v4 y variables de diseño
 |   |-- main.tsx                        # Punto de entrada ReactDOM
-|   |-- types.ts                        # Contratos TypeScript de Candidate, Vacancy y RBAC
+|   |-- types.ts                        # Contratos Candidate, Vacancy, FitScoreBreakdown, EvaluationNote, RBAC
 |   |-- components/
 |   |   |-- AdminPanel.tsx              # Gobernanza ISO, auditoría LFPDPPP y seguridad JWT
 |   |   |-- AuditLogPanel.tsx           # Visor en tiempo real de log_auditoria
 |   |   |-- CalendarPanel.tsx           # Agenda y programación de entrevistas
-|   |   |-- CandidatePanel.tsx          # Expedientes, FitScore, Double-Check y Speech
+|   |   |-- CandidatePanel.tsx          # Expedientes, Trazabilidad del Score, Notas Estructuradas y Double-Check
 |   |   |-- CareersPortal.tsx           # Portal público externo de vacantes
 |   |   |-- DashboardPanel.tsx          # Tablero ejecutivo KPIs y gráficos Recharts
 |   |   |-- EasLogo.tsx                 # Identidad visual corporativa
@@ -84,13 +84,13 @@ talent_ia_frontend/
 |   \-- utils/
 |       |-- areas.ts                    # Normalización de áreas operativas
 |       |-- auditLogger.ts              # Registro estructurado de eventos cliente
-|       |-- canonicalCvNormalizer.ts    # Limpieza canónica en vista previa
+|       |-- canonicalCvNormalizer.ts    # Limpieza canónica y detectDegradedCvFields en vista previa
 |       |-- clipboardUtils.ts           # Copiado de speeches y reactivos
-|       |-- doubleCheckEvaluator.ts     # Evaluación local y validación de respuestas
-|       |-- questionEngine.ts           # Motor de reactivos técnicos situacionales
+|       |-- doubleCheckEvaluator.ts     # Evaluación local STAR con conjugaciones ampliadas ES/EN
+|       |-- questionEngine.ts           # Reactivos por brecha sincronizados con auditCandidateRequirements
 |       |-- securityUtils.ts            # Utilidades de sesión e inactividad
 |       |-- textRepair.ts               # Corrección de mojibake UTF-8
-|       |-- vacancyUtils.ts             # Cálculo de FitScore 4D y niveles guía
+|       |-- vacancyUtils.ts             # FitScore 4D por secciones, nivel guía y FitScoreBreakdown
 |       \-- *.test.ts                   # Suites de pruebas unitarias (tsx)
 |-- docs/                               # Documentación oficial PDF y Draw.io
 |-- .env.example                        # Plantilla segura de variables Vite
