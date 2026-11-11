@@ -141,3 +141,4 @@ npm run build
 docker build -t talent-ia-frontend:2.0 .
 docker run -d -p 8080:80 --name eas-recruiting-frontend talent-ia-frontend:2.0
 ```
+

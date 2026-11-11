@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { api, authFetch, getAuthToken } from './api';
-import { 
-  Sparkles, 
-  Wifi, 
-  HelpCircle, 
-  Clock, 
-  FileCheck, 
-  Database, 
+import {
+  Sparkles,
+  Wifi,
+  HelpCircle,
+  Clock,
+  FileCheck,
+  Database,
   Lock,
   ShieldCheck,
   Trash2,
@@ -32,8 +32,8 @@ import { Candidate, InterviewSlot, WorkflowStage, UserRole, Vacancy } from './ty
 import { formatVacancyTitle, fixCorruptedAccents, calculateStrictFitScore, cleanCandidateName } from './utils/vacancyUtils';
 // INITIAL_CANDIDATES / INITIAL_VACANCIES ya NO se importan en el front: contienen datos personales
 // reales de candidatos y quedaban embebidos en el bundle JS público (descargable sin login).
-import { 
-  INITIAL_STAGES, 
+import {
+  INITIAL_STAGES,
   INITIAL_INTERVIEWS
 } from './data/samples';
 
@@ -176,7 +176,7 @@ export default function App() {
     }
   });
   const [stages, setStages] = useState<WorkflowStage[]>(INITIAL_STAGES);
-  
+
   // Navigation & Permissions & OAuth M365 Integration
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     // La sesión requiere un JWT emitido por el servidor (antes bastaba el flag 'eas_authenticated').
@@ -224,7 +224,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isMobileOpen, setIsMobileOpen] = useState<boolean>(false);
 
-  
+
   // Rule: Estefany and Brandon are locked to RECRUITER role
   useEffect(() => {
     const emailLow = (userEmail || '').toLowerCase();
@@ -272,7 +272,7 @@ export default function App() {
     isLoggingOutRef.current = true;
     try {
       recordAuditLog('LOGOUT_SESION', 'Autenticación', 'SUCCESS', `Cierre de sesión corporativa para ${userEmail}.`, userEmail);
-    } catch (_) {}
+    } catch (_) { }
     localStorage.removeItem('eas_authenticated');
     localStorage.removeItem('eas_user_email');
     localStorage.removeItem('eas_user_name');
@@ -307,7 +307,7 @@ export default function App() {
     // Sesión continua activa sin temporizador de inactividad
   }, [isAuthenticated]);
 
-  
+
   // Server health state check
   const [serverOnline, setServerOnline] = useState<boolean>(true);
   const [geminiConfigured, setGeminiConfigured] = useState<boolean>(false);
@@ -402,9 +402,9 @@ export default function App() {
       setCandidates(prev => [newCandidate, ...prev]);
     };
     return (
-      <CareersPortal 
-        vacancies={vacancies} 
-        onApplicationComplete={handleApplicationComplete} 
+      <CareersPortal
+        vacancies={vacancies}
+        onApplicationComplete={handleApplicationComplete}
       />
     );
   }
@@ -488,11 +488,11 @@ export default function App() {
           {/* Header Branding */}
           <div className="flex flex-col items-center gap-3">
             <div className="mb-1">
-              <img 
-                src={logoUrl || '/eas_logo.png'} 
-                onError={(e) => { e.currentTarget.src = '/eas_logo.png'; }} 
-                alt="EAS Consulting Logotipo" 
-                className="h-20 w-auto object-contain mx-auto" 
+              <img
+                src={logoUrl || '/eas_logo.png'}
+                onError={(e) => { e.currentTarget.src = '/eas_logo.png'; }}
+                alt="EAS Consulting Logotipo"
+                className="h-20 w-auto object-contain mx-auto"
               />
             </div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-eas-blue-50 border border-eas-blue-200 text-[11px] font-bold text-[#103268]">
@@ -588,7 +588,7 @@ export default function App() {
 
             {/* Modal de Recuperación de Contraseña */}
             {showForgotPasswordModal && (
-              <ForgotPasswordModal 
+              <ForgotPasswordModal
                 onClose={() => setShowForgotPasswordModal(false)}
                 onPasswordReset={(email) => {
                   setShowForgotPasswordModal(false);
@@ -615,7 +615,7 @@ export default function App() {
                       <p className="text-[10px] text-indigo-200">EAS Consulting Group (easconsulting.com.mx)</p>
                     </div>
                   </div>
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setShowRegisterModal(false)}
                     className="text-white/80 hover:text-white text-lg font-bold p-1 cursor-pointer"
@@ -715,7 +715,7 @@ export default function App() {
 
   return (
     <div className="flex bg-slate-50 min-h-screen text-slate-700 w-full font-sans antialiased">
-      
+
       {/* Lateral navigation Sidebar */}
       <Sidebar
         activeTab={activeTab}
@@ -735,7 +735,7 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 flex flex-col min-w-0 overflow-x-hidden h-screen max-h-screen">
-        
+
         {/* Dynamic Top Administration Banner (Static/Sticky on scroll) */}
         <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex justify-between items-center shrink-0 no-print shadow-xs transition-all duration-200">
           <div className="flex items-center gap-3">
@@ -749,11 +749,10 @@ export default function App() {
             </button>
 
             <div className="space-y-1">
-              <span className={`text-[10px] font-mono font-bold tracking-widest uppercase px-2 py-0.5 rounded-md ${
-                activeRole === 'ADMIN' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/50' : 
-                activeRole === 'RECRUITER' ? 'bg-eas-blue-50 text-eas-blue-800 border border-eas-blue-200/50' : 
-                'bg-purple-50 text-purple-700 border border-purple-200/50'
-              }`}>
+              <span className={`text-[10px] font-mono font-bold tracking-widest uppercase px-2 py-0.5 rounded-md ${activeRole === 'ADMIN' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/50' :
+                  activeRole === 'RECRUITER' ? 'bg-eas-blue-50 text-eas-blue-800 border border-eas-blue-200/50' :
+                    'bg-purple-50 text-purple-700 border border-purple-200/50'
+                }`}>
                 {activeRole === 'ADMIN' ? 'Sistemas Centrales' : 'Capital Humano'}
               </span>
               <h2 className="text-sm sm:text-base font-bold text-slate-950 leading-none">
@@ -766,26 +765,24 @@ export default function App() {
 
           {/* Network Connection status indicators */}
           <div className="flex items-center gap-2 sm:gap-3 text-xs font-semibold select-none">
-            
+
             {/* Server connection */}
-            <div className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border text-xs ${
-              serverOnline 
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+            <div className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border text-xs ${serverOnline
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                 : 'bg-amber-50 text-amber-700 border-amber-200'
-            }`}>
+              }`}>
               <Wifi className={`h-3.5 w-3.5 ${serverOnline ? 'text-emerald-500' : 'text-amber-500 animate-pulse'}`} />
               <span className="hidden sm:inline">{serverOnline ? 'EAS-Hub Online' : 'Local Sandbox Mode'}</span>
               <span className="sm:hidden">{serverOnline ? 'Online' : 'Sandbox'}</span>
             </div>
 
             {/* Gemini API configuration state */}
-            <button 
+            <button
               onClick={() => setShowAiConfigModal(true)}
-              className={`cursor-pointer inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border text-xs hover:bg-slate-100 transition-colors duration-150 ${
-                geminiConfigured 
-                  ? 'bg-eas-blue-50 text-eas-blue-800 border-eas-blue-200' 
+              className={`cursor-pointer inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border text-xs hover:bg-slate-100 transition-colors duration-150 ${geminiConfigured
+                  ? 'bg-eas-blue-50 text-eas-blue-800 border-eas-blue-200'
                   : 'bg-slate-50 text-slate-600 border-slate-200'
-              }`}
+                }`}
               title="Configurar motor de IA / API Key de Gemini"
             >
               <Sparkles className={`h-3.5 w-3.5 ${geminiConfigured ? 'text-eas-red-500' : 'text-slate-400'}`} />
@@ -794,7 +791,7 @@ export default function App() {
             </button>
 
             {/* Privacy Law GDPR stamp */}
-            <button 
+            <button
               onClick={() => setShowPrivacyModal(true)}
               className="cursor-pointer hidden md:inline-flex items-center gap-1.5 text-slate-500 px-3 py-1 border border-slate-200 rounded-full bg-slate-50/50 hover:bg-slate-100 transition-colors duration-150"
               title="Ver Certificado de Privacidad LFPDPPP"
@@ -858,7 +855,7 @@ export default function App() {
           >
             {/* Tab routing container */}
             {activeTab === 'dashboard' && (
-              <DashboardPanel 
+              <DashboardPanel
                 candidates={candidates}
                 vacancies={vacancies}
                 interviews={interviews}
@@ -868,7 +865,7 @@ export default function App() {
             )}
 
             {activeTab === 'vacancies' && (
-              <VacanciesPanel 
+              <VacanciesPanel
                 vacancies={vacancies}
                 setVacancies={setVacancies}
                 candidates={candidates}
@@ -878,7 +875,7 @@ export default function App() {
             )}
 
             {activeTab === 'candidates' && (
-              <CandidatePanel 
+              <CandidatePanel
                 candidates={candidates}
                 onCandidateCreated={(c) => {
                   setCandidates(prev => deduplicateCandidatesList([c, ...prev.filter(item => item.id !== c.id)]));
@@ -930,7 +927,7 @@ export default function App() {
                   <Lock className="h-5 w-5 text-emerald-400" />
                   <h3 className="font-bold text-base">Certificado de Cumplimiento LFPDPPP</h3>
                 </div>
-                <button 
+                <button
                   onClick={() => setShowPrivacyModal(false)}
                   className="text-white/80 hover:text-white text-lg font-bold p-1 cursor-pointer"
                 >
@@ -990,7 +987,7 @@ export default function App() {
                   <Sparkles className="h-5 w-5 text-indigo-300" />
                   <h3 className="font-bold text-base">Consola EAS AI Engine</h3>
                 </div>
-                <button 
+                <button
                   onClick={() => setShowAiConfigModal(false)}
                   className="text-white/80 hover:text-white text-lg font-bold p-1 cursor-pointer"
                 >
@@ -1073,7 +1070,7 @@ export default function App() {
 
         {/* Modal de Advertencia por Inactividad (15 Minutos - ISO 27001) */}
         {showInactivityWarning && (
-          <InactivityModal 
+          <InactivityModal
             secondsRemaining={inactivitySecondsRemaining}
             onStayLoggedIn={() => {
               setLastActivityTime(Date.now());
@@ -1085,7 +1082,7 @@ export default function App() {
 
         {/* Modal de Desafío MFA (2FA TOTP Obligatorio) */}
         {showMfaModal && (
-          <MfaModal 
+          <MfaModal
             userEmail={userEmail}
             userRole={activeRole}
             onVerified={() => {
@@ -1102,7 +1099,7 @@ export default function App() {
 
         {/* Modal de Cambio de Contraseña en Primer Login */}
         {showPasswordChangeModal && (
-          <PasswordChangeModal 
+          <PasswordChangeModal
             userEmail={userEmail}
             isFirstLogin={true}
             onSuccess={(newPass) => {
