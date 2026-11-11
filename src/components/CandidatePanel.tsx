@@ -21,13 +21,14 @@ import {
 import { generateExperienceQuestions, FIXED_AVAILABILITY_QUESTIONS } from '../utils/questionEngine';
 import { recordAuditLog } from '../utils/auditLogger';
 import { copyToClipboard } from '../utils/clipboardUtils';
-import { 
-  normalizeCanonicalExperience, 
-  normalizeCanonicalEducation, 
-  normalizeCanonicalCertifications, 
-  isLocationString, 
+import {
+  normalizeCanonicalExperience,
+  normalizeCanonicalEducation,
+  normalizeCanonicalCertifications,
+  isLocationString,
   stripBulletPoints,
-  cleanExecutiveDetails
+  cleanExecutiveDetails,
+  detectDegradedCvFields
 } from '../utils/canonicalCvNormalizer';
 
 export function cleanEnginePrefix(text?: string): string {
@@ -76,7 +77,7 @@ export function formatWorkExperienceItem(expStr: string): { position: string; co
     if (l === 'periodo profesional' || l === 'periodo laboral' || l === 'periodo no especificado' || l.includes('periodo')) return false;
     if (MONTHS_NAMES_REGEX.test(l) || TEMPORAL_MARKERS_REGEX.test(l)) return true;
     return /\b(19\d{2}|20\d{2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|presente|actual|actualidad|present)\b/i.test(str) ||
-           /\b(20\d{2}\s*[-–—\sa-zÁÉÍÓÚáéíóú]*\s*(?:20\d{2}|19\d{2}|presente|actual)?)\b/i.test(str);
+      /\b(20\d{2}\s*[-–—\sa-zÁÉÍÓÚáéíóú]*\s*(?:20\d{2}|19\d{2}|presente|actual)?)\b/i.test(str);
   };
 
   const isPositionStr = (str: string): boolean => {
@@ -218,8 +219,8 @@ const isJunkEduString = (str: string): boolean => {
   if (!str) return true;
   const l = str.trim().toLowerCase();
   return /^(of \d+|page \d+|\d+ of \d+|p[aá]gina \d+|hoja \d+|--|\/\/|==|\.)$/i.test(l) ||
-         /\b(of 2|of 3|of 4|página|hoja)\b/i.test(l) ||
-         l === '--' || l.length <= 2;
+    /\b(of 2|of 3|of 4|página|hoja)\b/i.test(l) ||
+    l === '--' || l.length <= 2;
 };
 
 export function normalizeEducationList(rawList: string[]): string[] {
@@ -312,7 +313,7 @@ export function formatEducationItem(eduStr: string): { degree: string; instituti
     const l = str.toLowerCase();
     if (l.includes('periodo')) return false;
     return /\b(19\d{2}|20\d{2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)\b/i.test(str) ||
-           /\b(20\d{2}\s*[-–—\sa-zÁÉÍÓÚáéíóú]*\s*(?:20\d{2}|19\d{2})?)\b/i.test(str);
+      /\b(20\d{2}\s*[-–—\sa-zÁÉÍÓÚáéíóú]*\s*(?:20\d{2}|19\d{2})?)\b/i.test(str);
   };
 
   const isInstStr = (str: string) => {
@@ -529,22 +530,41 @@ export function extractCvSectionsFromText(resumeText: string = ''): {
       continue;
     }
 
-    // Header trigger check
-    if (cleanL.length < 50 && (
+    // Header trigger check (incluye dos columnas, espaciado o extendido)
+    const expHeaderSegs = line.split(/\t|\s{3,}/).map(s => s.replace(/^[•\-\*\d\.\)\s✓●:]+|[:\s]+$/g, '').trim()).filter(Boolean);
+    const hasExpSeg = expHeaderSegs.some(seg => {
+      const segLow = seg.toLowerCase();
+      const segCol = segLow.replace(/\s+/g, '');
+      return seg.length < 55 && (
+        [
+          'experiencialaboral', 'experienciaprofesional', 'experienciaprofesionalyaplicada',
+          'trayectorialaboral', 'trayectoriaprofesional', 'workexperience', 'experiencia',
+          'experience', 'professionalexperience', 'professionalworkexperience',
+          'employmenthistory', 'workhistory', 'relevantexperience', 'experienciarelevante',
+          'historiallaboral'
+        ].includes(segCol) ||
+        segLow.startsWith('experiencia profesional') || segLow.startsWith('experiencia laboral') ||
+        segLow.startsWith('professional experience') || segLow.startsWith('work experience') ||
+        segLow.startsWith('professional work experience') || segLow.startsWith('experiencia relevante')
+      );
+    });
+    if (hasExpSeg || (cleanL.length < 55 && (
       [
-        'experiencialaboral', 'experienciaprofesional', 'trayectorialaboral',
-        'workexperience', 'experiencia', 'experience', 'professionalexperience',
-        'professionalworkexperience', 'employmenthistory', 'workhistory', 'relevantexperience',
-        'experienciarelevante', 'historiallaboral'
+        'experiencialaboral', 'experienciaprofesional', 'experienciaprofesionalyaplicada',
+        'trayectorialaboral', 'trayectoriaprofesional', 'workexperience', 'experiencia',
+        'experience', 'professionalexperience', 'professionalworkexperience',
+        'employmenthistory', 'workhistory', 'relevantexperience', 'experienciarelevante',
+        'historiallaboral'
       ].includes(collapsed) ||
+      cleanLow.startsWith('experiencia profesional') || cleanLow.startsWith('experiencia laboral') ||
       cleanLow.startsWith('professional experience') || cleanLow.startsWith('work experience') ||
       cleanLow.startsWith('professional work experience') || cleanLow.startsWith('experiencia relevante')
-    )) {
+    ))) {
       inExp = true;
       continue;
     }
 
-    if (inExp && cleanL.length < 35 && (
+    if (inExp && experience.length > 0 && cleanL.length < 35 && (
       sectionBreakRegex.test(cleanLow) ||
       ['educacion', 'educación', 'formacionacademica', 'formaciónacadémica', 'estudios', 'certificaciones'].includes(collapsed)
     )) {
@@ -554,8 +574,8 @@ export function extractCvSectionsFromText(resumeText: string = ''): {
     if (!inExp) continue;
 
     if (
-      cleanLow.startsWith('nacimiento') || cleanLow.startsWith('nacionalidad') || cleanLow.startsWith('estado civil') || 
-      cleanLow.startsWith('dirección') || cleanLow.startsWith('email') || cleanLow.startsWith('teléfono') || 
+      cleanLow.startsWith('nacimiento') || cleanLow.startsWith('nacionalidad') || cleanLow.startsWith('estado civil') ||
+      cleanLow.startsWith('dirección') || cleanLow.startsWith('email') || cleanLow.startsWith('teléfono') ||
       cleanLow.startsWith('phone:') || cleanLow.startsWith('e-mail:') || cleanLow.includes('of 3') || cleanLow.includes('of 2')
     ) {
       continue;
@@ -643,9 +663,59 @@ export function extractCvSectionsFromText(resumeText: string = ''): {
       }
     }
 
+    // Renglón aislado con SOLO rango de fechas (ej: "Junio 2023–Actualidad"), seguido de "Puesto • Empresa" en i+1
+    const standaloneDateRangeMatch = cleanL.match(/^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)[a-záéíóú]*\.?\s*(?:de\s+)?)?(?:19\d{2}|20\d{2}|\d{1,2}\/\d{4})\s*[-–—a]+\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)[a-záéíóú]*\.?\s*(?:de\s+)?)?(?:19\d{2}|20\d{2}|\d{1,2}\/\d{4}|actual|actualidad|present|presente|fecha)\s*$/i);
+    if (standaloneDateRangeMatch && cleanL.length < 55 && !roleKeywordsRegex.test(cleanL)) {
+      commitJob();
+      currentPeriod = cleanL;
+      if (i + 1 < rawLines.length) {
+        const next1 = rawLines[i + 1].replace(/^[•\-\*\d\.\)\s✓●]+/, '').trim();
+        if (next1.length > 3 && next1.length < 130 && !/^(educaci[oó]n|certificac|habilidades)/i.test(next1)) {
+          const splitByBulletOrPipe = next1.split(/[•|]/).map(p => p.trim()).filter(Boolean);
+          const parts = splitByBulletOrPipe.length >= 2
+            ? splitByBulletOrPipe
+            : next1.split(/\s+[–—-]\s+/).map(p => p.trim()).filter(Boolean);
+          if (parts.length >= 2) {
+            const validParts = parts.filter(p => !isLocationString(p));
+            if (validParts.length >= 2) {
+              if (roleKeywordsRegex.test(validParts[0])) {
+                currentRole = validParts[0];
+                currentCompany = validParts[1];
+              } else {
+                currentCompany = validParts[0];
+                currentRole = validParts[1];
+              }
+            } else if (validParts.length === 1) {
+              if (roleKeywordsRegex.test(validParts[0])) {
+                currentRole = validParts[0];
+              } else {
+                currentCompany = validParts[0];
+              }
+            }
+            i++;
+          } else if (next1.length < 85 && !next1.endsWith('.')) {
+            if (roleKeywordsRegex.test(next1)) {
+              currentRole = next1;
+              if (i + 2 < rawLines.length && rawLines[i + 2].trim().length < 80 && !dateRegex.test(rawLines[i + 2]) && !/^(●|•|\-)/.test(rawLines[i + 2].trim())) {
+                currentCompany = rawLines[i + 2].replace(/^[•\-\*\d\.\)\s✓●]+/, '').trim();
+                i += 2;
+              } else {
+                i++;
+              }
+            } else {
+              currentCompany = next1;
+              i++;
+            }
+          }
+        }
+      }
+      continue;
+    }
+
     // Formato con fecha al inicio: "Fecha \t Puesto, Empresa" o "Fecha \t Empresa | Puesto"
-    const dateFirstMatch = cleanL.match(/^([a-záéíóú0-9\s–—\-\.\/]+(?:20\d{2}|19\d{2}|actual|presente))\s*[\t\-\–\|]\s*(.+)$/i);
-    if (dateFirstMatch && cleanL.length < 110) {
+    const dateFirstMatch = cleanL.match(/^([a-záéíóú0-9\s–—\-\.\/]+(?:20\d{2}|19\d{2}|actual|presente))\s*[\t\|]\s*(.+)$/i)
+      || cleanL.match(/^((?:(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec)[a-z]*\s+)?(?:19\d{2}|20\d{2})\s*[-–—]\s*(?:(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec)[a-z]*\s+)?(?:19\d{2}|20\d{2}|actual|actualidad|present|presente))\s+[-–—\|]?\s*(.+)$/i);
+    if (dateFirstMatch && cleanL.length < 130 && !/^(?:actual|actualidad|present|presente|fecha)$/i.test(dateFirstMatch[2].trim())) {
       commitJob();
       currentPeriod = dateFirstMatch[1].trim();
       const rest = dateFirstMatch[2].trim();
@@ -758,6 +828,50 @@ export function extractCvSectionsFromText(resumeText: string = ''): {
 
   commitJob();
 
+  // Rescate heurístico sin cabecera de sección si el texto tiene empleos con fecha y puesto/separador
+  if (experience.length === 0) {
+    for (let i = 0; i < rawLines.length && experience.length < 3; i++) {
+      const cleanL = rawLines[i].replace(/^[•\-\*\d\.\)\s✓●]+/, '').trim();
+      if (cleanL.length < 10 || cleanL.length > 135) continue;
+      if (/\b(universidad|instituto tecnol[oó]gico|facultad|licenciatura|ingenier[ií]a en|bachillerato)\b/i.test(cleanL) && !roleKeywordsRegex.test(cleanL)) continue;
+      const pMatch = cleanL.match(dateRegex);
+      if (!pMatch) continue;
+      const period = pMatch[0].trim();
+      const noDate = cleanL.replace(period, '').replace(/^[•*()\[\]\s\t–—,.\-|]+|[•*()\[\]\s\t–—,.\-|]+$/g, '').trim();
+      if (noDate.length < 6) continue;
+      const segs = noDate.split(/\t|\||•|\s+[–—-]\s+/).map(s => s.trim()).filter(Boolean).filter(s => !isLocationString(s));
+      if (segs.length >= 2) {
+        const r = roleKeywordsRegex.test(segs[0]) ? segs[0] : (roleKeywordsRegex.test(segs[1]) ? segs[1] : segs[0]);
+        const c = r === segs[0] ? segs[1] : segs[0];
+        experience.push(`${r} | ${c} | ${period}`);
+      } else if (roleKeywordsRegex.test(noDate)) {
+        experience.push(`${noDate} | Empresa | ${period}`);
+      }
+    }
+    // Pares consecutivos sin fecha en el mismo renglón: Empresa en i, Puesto en i+1
+    if (experience.length === 0) {
+      for (let i = 0; i < rawLines.length - 1 && experience.length < 3; i++) {
+        const compCand = rawLines[i].replace(/^[•\-\*\d\.\)\s✓●]+/, '').trim();
+        const roleCand = rawLines[i + 1].replace(/^[•\-\*\d\.\)\s✓●]+/, '').trim();
+        if (
+          compCand.length >= 3 && compCand.length <= 55 &&
+          roleCand.length >= 5 && roleCand.length <= 65 &&
+          !/^[●•\-*]/.test(rawLines[i].trim()) && !/^[●•\-*]/.test(rawLines[i + 1].trim()) &&
+          !compCand.includes(':') && !isLocationString(compCand) &&
+          !/^(quien soy|estudios|idiomas|referencias|programas|habilidades|experiencia|educaci[oó]n|t[ií]tulo)/i.test(compCand) &&
+          roleKeywordsRegex.test(roleCand) &&
+          !/\b(universidad|instituto|licenciatura|ingenier[ií]a|egresado|t[ií]tulo)\b/i.test(compCand + ' ' + roleCand)
+        ) {
+          const item = `${roleCand} | ${compCand} | Periodo profesional`;
+          if (!experience.some(e => e.toLowerCase() === item.toLowerCase())) {
+            experience.push(item);
+          }
+          i++;
+        }
+      }
+    }
+  }
+
   // 3. Educación
   const education: string[] = [];
   let inEdu = false;
@@ -765,18 +879,22 @@ export function extractCvSectionsFromText(resumeText: string = ''): {
 
   for (const line of rawLines) {
     const l = line.toLowerCase();
-    const cleanL = line.replace(/^[•\-\*\d\.\)\s✓]+/, '').trim();
-    const collapsed = cleanL.toLowerCase().replace(/\s+/g, '');
+    const cleanL = line.replace(/^[•\-\*\d\.\)\s✓●]+/, '').trim();
+    const eduHeaderSegs = line.split(/\t|\s{3,}/).map(s => s.replace(/^[•\-\*\d\.\)\s✓●:]+|[:\s]+$/g, '').trim()).filter(Boolean);
+    const matchesEduHeader = eduHeaderSegs.some(seg => {
+      const segLow = seg.toLowerCase();
+      const segCol = segLow.replace(/\s+/g, '');
+      return seg.length < 45 && (
+        ['educacion', 'educación', 'estudios', 'formacionacademica', 'formaciónacadémica', 'formacion', 'formación', 'education', 'academicbackground', 'escolaridad', 'preparacionacademica', 'preparaciónacadémica'].includes(segCol) ||
+        segLow.startsWith('formación académica') || segLow.startsWith('educación:')
+      );
+    });
 
-    if (cleanL.length < 35 && (
-      ['educacion', 'educación', 'estudios', 'formacionacademica', 'formaciónacadémica', 'education'].includes(collapsed)
-    )) {
+    if (matchesEduHeader || (cleanL.length < 40 && ['educacion', 'educación', 'estudios', 'formacionacademica', 'formaciónacadémica', 'formacion', 'formación', 'education', 'escolaridad'].includes(cleanL.toLowerCase().replace(/\s+/g, '')))) {
       inEdu = true;
       continue;
     }
-    if (inEdu && cleanL.length < 35 && (
-      ['certificaciones', 'cursos', 'idiomas', 'habilidades', 'contacto', 'reconocimientos'].includes(collapsed)
-    )) {
+    if (inEdu && cleanL.length < 40 && /^(certificaciones|cursos|idiomas|habilidades|contacto|experiencia|referencias)\b/i.test(cleanL)) {
       break;
     }
     if (!inEdu) continue;
@@ -784,16 +902,51 @@ export function extractCvSectionsFromText(resumeText: string = ''): {
     if (l.startsWith('nacimiento') || l.startsWith('nacionalidad') || l.startsWith('estado civil') || l.startsWith('dirección') || l.startsWith('email') || l.startsWith('teléfono') || l.includes('of 3') || l.includes('of 2') || isJunkEduString(cleanL)) {
       continue;
     }
-
-    if (cleanL.length > 5 && !isJunkEduString(cleanL) && eduLines.length < 3) {
-      eduLines.push(cleanL);
+    const hasAcademicSignal = /\b(licenciatura|ingenier[ií]a|ingeniero|maestr[ií]a|master|mba|doctorado|t[eé]cnico|bachillerato|t[ií]tulo|certificado|universidad|instituto|tecnol[oó]gico|facultad|escuela|unam|ipn|uam|itesm|uvm|unitec|udg|uanl|buap)\b/i.test(cleanL);
+    const hasWorkSignal = /\b(empresa|s\.?a\.?\s*de\s*c\.?v\.?|consultor|analista|desarrollador|gerente|actualidad|presente|tareas realizadas|monitoreo|administraci[oó]n de usuarios|solman|service\s*now)\b/i.test(cleanL) || /\t/.test(line) || /^[•●▪]/.test(line.trim());
+    if ((hasWorkSignal || eduLines.length === 0) && !hasAcademicSignal) {
+      continue;
     }
+
+    if (cleanL.length > 3 && !isJunkEduString(cleanL) && eduLines.length < 4) {
+      if (eduLines.length === 1 && !hasAcademicSignal && cleanL.length < 32 && !/\d{4}/.test(cleanL) && /^[a-záéíóúñ\s]+$/i.test(cleanL)) {
+        eduLines[0] = `${eduLines[0]} ${cleanL}`.replace(/\s{2,}/g, ' ').trim();
+      } else if (eduLines.length < 3) {
+        eduLines.push(cleanL);
+      }
+    }
+  }
+
+  if (eduLines.length === 0) {
+    let foundDeg = '';
+    let foundInst = '';
+    let foundPeriod = '';
+    for (const line of rawLines) {
+      const cleanLine = line.replace(/^[•\-\*\d\.\)\s✓●]+/, '').trim();
+      if (cleanLine.length < 6 || cleanLine.length > 140) continue;
+      if (!foundDeg && /\b(licenciatura|ingenier[ií]a|maestr[ií]a|posgrado|bachelor|master|mba|doctorado|t[eé]cnico superior)\b/i.test(cleanLine)) {
+        foundDeg = cleanLine;
+        const pMatch = cleanLine.match(/\b(19\d{2}|20\d{2})(?:\s*[-–—]\s*(?:19\d{2}|20\d{2}|actual|actualidad))?\b/i);
+        if (pMatch) foundPeriod = pMatch[0];
+      }
+      if (!foundInst && /\b(universidad|instituto tecnol[oó]gico|tecnol[oó]gico de|itesm|unam|ipn|uam|uvm|unitec|udg|uanl|buap|poli|facultad)\b/i.test(cleanLine)) {
+        foundInst = cleanLine;
+        const pMatch = cleanLine.match(/\b(19\d{2}|20\d{2})(?:\s*[-–—]\s*(?:19\d{2}|20\d{2}|actual|actualidad))?\b/i);
+        if (pMatch && !foundPeriod) foundPeriod = pMatch[0];
+      }
+    }
+    if (foundDeg) eduLines.push(foundDeg);
+    if (foundInst && foundInst !== foundDeg) eduLines.push(foundInst);
+    if (foundPeriod) eduLines.push(foundPeriod);
   }
 
   if (eduLines.length > 0) {
     let degree = eduLines[0];
     let inst = eduLines.length > 1 ? eduLines[1] : 'Universidad / Instituto de Educación Superior';
-    const period = 'Periodo de estudios';
+    let period = 'Periodo de estudios';
+    if (eduLines.length >= 3 && dateRegex.test(eduLines[2])) {
+      period = eduLines[2];
+    }
 
     if (/universidad|instituto|unitec|unam|ipn|itesm|uvm|uam|tecmilenio/i.test(degree) && !/universidad|instituto|unitec|unam|ipn|itesm|uvm|uam|tecmilenio/i.test(inst)) {
       const tmp = degree;
@@ -802,7 +955,7 @@ export function extractCvSectionsFromText(resumeText: string = ''): {
     }
     education.push(`${degree} | ${inst} | ${period}`);
   } else {
-    education.push("Licenciatura / Ingeniería en Sistemas o Formación Afín | Universidad / Instituto de Educación Superior | Periodo de estudios");
+    education.push("Formación Profesional / Superior | Institución Educativa (por validar en entrevista) | Periodo de estudios");
   }
 
   // 4. Certificaciones
@@ -1043,7 +1196,7 @@ export default function CandidatePanel({
           : c.growths.map(fixCorruptedAccents),
         guidanceAlert: assignedVacancy ? (strictEval.hasDomainMismatch ? true : gEval.guidanceAlert) : false,
         detectedGuidanceLevel: gEval.detectedGuidanceLevel,
-        guidanceGapDetails: strictEval.hasDomainMismatch 
+        guidanceGapDetails: strictEval.hasDomainMismatch
           ? (strictEval.mismatchReason || 'INCOMPATIBILIDAD CRÍTICA DE PROFESIÓN: La formación o profesión del candidato no es acorde con la vacante solicitada.')
           : gEval.guidanceGapDetails
       };
@@ -1317,7 +1470,7 @@ export default function CandidatePanel({
       : (cvExtracted.summary || candSummaryClean || "Profesional especialista con sólida trayectoria en gestión de proyectos y consultoría tecnológica.");
     const fullExperience = (Array.isArray(candidate.experience) && candidate.experience.length > 0) ? candidate.experience : cvExtracted.experience;
     const activeExperience = normalizeCanonicalExperience(fullExperience);
-    
+
     const activeEducationRaw = (Array.isArray(candidate.education) && candidate.education.length > 0) ? candidate.education : cvExtracted.education;
     let activeEducation = normalizeCanonicalEducation(activeEducationRaw);
     if (activeEducation.length === 0 && candidate.resumeText) {
@@ -1599,11 +1752,11 @@ export default function CandidatePanel({
         stage,
         user: `${userName} (${activeRole})`
       };
-      
+
       const newVacId = stage === 'Pool' ? '' : candidate.vacancyId;
 
-      const updated = { 
-        ...candidate, 
+      const updated = {
+        ...candidate,
         stage,
         vacancyId: newVacId,
         history: [...(candidate.history || []), historyItem]
@@ -1620,7 +1773,7 @@ export default function CandidatePanel({
   }
 
   async function handleFeedback(candidate: Candidate, outcome: 'Hired' | 'Rejected') {
-    const defaultComment = outcome === 'Hired' 
+    const defaultComment = outcome === 'Hired'
       ? 'Demostró sólida experiencia técnica y aptitud profesional excelente durante la evaluación.'
       : 'No se adecúa al perfil requerido para la vacante.';
 
@@ -1640,9 +1793,9 @@ export default function CandidatePanel({
         user: `${userName} (${activeRole})`,
         details: `Retroalimentación: ${userComments}`
       };
-      
-      const updated = { 
-        ...candidate, 
+
+      const updated = {
+        ...candidate,
         stage: outcome === 'Hired' ? 'Contratado' : 'Rechazado',
         comments: candidate.comments ? `${candidate.comments}\n[Retroalimentación] ${userComments}` : `[Retroalimentación] ${userComments}`,
         history: [...(candidate.history || []), historyItem]
@@ -1762,7 +1915,7 @@ export default function CandidatePanel({
   return (
     <div className="fade-in">
       {/* Top Header & Control Menu - Dynamic Scrolling Header */}
-      <div 
+      <div
         className="bg-[#f8fafc] transition-all pt-4 pb-4 mb-6 border-b border-slate-200 shadow-sm -mx-4 sm:-mx-6 lg:-mx-12 px-4 sm:px-6 lg:px-12"
       >
         <div className="view-header flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
@@ -1790,17 +1943,17 @@ export default function CandidatePanel({
                 Lista Detallada
               </button>
             </div>
-            <button 
-              type="button" 
-              className="btn btn-primary" 
+            <button
+              type="button"
+              className="btn btn-primary"
               onClick={() => { setFormTargetVacancyId(undefined); setInitialBulkMode(false); setShowForm(true); }}
             >
               <Plus size={16} /> Analizar candidato
             </button>
-            <button 
-              type="button" 
-              className="btn btn-primary" 
-              onClick={() => { setFormTargetVacancyId(undefined); setInitialBulkMode(true); setShowForm(true); }} 
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => { setFormTargetVacancyId(undefined); setInitialBulkMode(true); setShowForm(true); }}
               style={{ marginLeft: 8 }}
             >
               <UploadCloud size={16} style={{ marginRight: 4, verticalAlign: -3 }} /> Carga Masiva
@@ -1809,14 +1962,14 @@ export default function CandidatePanel({
         </div>
 
         {/* EAS TalentCore AI Floating Smart Banner */}
-        <div style={{ 
-          padding: '10px 18px', 
-          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)', 
-          color: '#ffffff', 
-          borderRadius: 12, 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between', 
+        <div style={{
+          padding: '10px 18px',
+          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+          color: '#ffffff',
+          borderRadius: 12,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
           marginBottom: 12,
           boxShadow: '0 4px 14px rgba(99,102,241,0.25)',
           flexWrap: 'wrap',
@@ -1935,19 +2088,19 @@ export default function CandidatePanel({
               )}
             </select>
 
-            <label style={{ 
-              display: 'inline-flex', 
-              alignItems: 'center', 
-              gap: 6, 
-              fontSize: 12, 
-              fontWeight: 600, 
-              color: filterOnlyMyArea ? '#1e40af' : '#475569', 
-              cursor: 'pointer', 
-              padding: '5px 10px', 
-              borderRadius: 8, 
-              backgroundColor: filterOnlyMyArea ? '#eff6ff' : '#f1f5f9', 
-              border: filterOnlyMyArea ? '1px solid #bfdbfe' : '1px solid #e2e8f0', 
-              transition: 'all 0.15s ease' 
+            <label style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              color: filterOnlyMyArea ? '#1e40af' : '#475569',
+              cursor: 'pointer',
+              padding: '5px 10px',
+              borderRadius: 8,
+              backgroundColor: filterOnlyMyArea ? '#eff6ff' : '#f1f5f9',
+              border: filterOnlyMyArea ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+              transition: 'all 0.15s ease'
             }}>
               <input
                 type="checkbox"
@@ -2041,11 +2194,11 @@ export default function CandidatePanel({
                       value={c.stage}
                       onChange={(e) => moveStage(c, e.target.value as CandidateStage)}
                       className="bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer pr-6 appearance-none"
-                      style={{ 
-                        backgroundPosition: 'right 6px center', 
-                        backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23475569' stroke-width='2' viewBox='0 0 24 24'><path stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/></svg>")`, 
-                        backgroundRepeat: 'no-repeat', 
-                        paddingRight: '22px' 
+                      style={{
+                        backgroundPosition: 'right 6px center',
+                        backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23475569' stroke-width='2' viewBox='0 0 24 24'><path stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/></svg>")`,
+                        backgroundRepeat: 'no-repeat',
+                        paddingRight: '22px'
                       }}
                     >
                       {STAGES.map((s) => (
@@ -2085,24 +2238,24 @@ export default function CandidatePanel({
             groupedByVacancy.map((vGroup) => {
               const isCollapsed = !!collapsedVacancies[vGroup.vacancyId];
               return (
-                <div 
+                <div
                   key={vGroup.vacancyId}
-                  style={{ 
-                    backgroundColor: '#ffffff', 
-                    borderRadius: 16, 
-                    border: '1px solid #cbd5e1', 
+                  style={{
+                    backgroundColor: '#ffffff',
+                    borderRadius: 16,
+                    border: '1px solid #cbd5e1',
                     padding: 16,
                     boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
                     transition: 'all 0.2s ease'
                   }}
                 >
                   {/* Vacancy Swimlane Header */}
-                  <div 
+                  <div
                     onClick={() => toggleVacancyCollapse(vGroup.vacancyId)}
-                    style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'space-between', 
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
                       marginBottom: isCollapsed ? 0 : 14,
                       paddingBottom: isCollapsed ? 0 : 10,
                       borderBottom: isCollapsed ? 'none' : '1.5px solid #e2e8f0',
@@ -2113,7 +2266,7 @@ export default function CandidatePanel({
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: '1 1 320px', minWidth: 0 }}>
-                      <div style={{ 
+                      <div style={{
                         backgroundColor: '#f1f5f9',
                         color: '#475569',
                         padding: '6px',
@@ -2125,12 +2278,12 @@ export default function CandidatePanel({
                       }}>
                         {isCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
                       </div>
-                      <div style={{ 
-                        backgroundColor: vGroup.vacancyId === 'unassigned' ? '#f1f5f9' : '#e0e7ff', 
+                      <div style={{
+                        backgroundColor: vGroup.vacancyId === 'unassigned' ? '#f1f5f9' : '#e0e7ff',
                         color: vGroup.vacancyId === 'unassigned' ? '#475569' : '#4338ca',
-                        padding: 8, 
-                        borderRadius: 10, 
-                        display: 'flex', 
+                        padding: 8,
+                        borderRadius: 10,
+                        display: 'flex',
                         alignItems: 'center',
                         flexShrink: 0
                       }}>
@@ -2201,14 +2354,14 @@ export default function CandidatePanel({
                           <span>Vincular Candidato</span>
                         </button>
                       )}
-                      <span style={{ 
-                        backgroundColor: '#f8fafc', 
-                        border: '1px solid #cbd5e1', 
-                        color: '#1e293b', 
-                        padding: '6px 14px', 
-                        borderRadius: 20, 
-                        fontSize: 13, 
-                        fontWeight: 800 
+                      <span style={{
+                        backgroundColor: '#f8fafc',
+                        border: '1px solid #cbd5e1',
+                        color: '#1e293b',
+                        padding: '6px 14px',
+                        borderRadius: 20,
+                        fontSize: 13,
+                        fontWeight: 800
                       }}>
                         {vGroup.candidates.length} {vGroup.candidates.length === 1 ? 'candidato en esta vacante' : 'candidatos en esta vacante'}
                       </span>
@@ -2227,11 +2380,11 @@ export default function CandidatePanel({
                               <span className="badge badge-neutral">{stageCandidates.length}</span>
                             </div>
                             {stageCandidates.length === 0 ? (
-                              <div style={{ 
-                                padding: '18px 8px', 
-                                textAlign: 'center', 
-                                color: '#94a3b8', 
-                                fontSize: 10.5, 
+                              <div style={{
+                                padding: '18px 8px',
+                                textAlign: 'center',
+                                color: '#94a3b8',
+                                fontSize: 10.5,
                                 fontStyle: 'italic',
                                 border: '1px dashed #e2e8f0',
                                 borderRadius: 10,
@@ -2246,9 +2399,9 @@ export default function CandidatePanel({
                                 const trendColor = initial ? (c.fitScore > initial ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : c.fitScore < initial ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-slate-50 text-slate-600 border border-slate-200') : 'bg-slate-100 text-slate-500 border border-slate-200';
 
                                 return (
-                                  <div 
-                                    key={c.id} 
-                                    className="bg-white border border-slate-200 hover:border-slate-350 text-left p-3 rounded-xl cursor-pointer hover:shadow-xs transition duration-150 flex flex-col justify-between gap-2.5 relative min-w-0 w-full overflow-hidden box-border" 
+                                  <div
+                                    key={c.id}
+                                    className="bg-white border border-slate-200 hover:border-slate-350 text-left p-3 rounded-xl cursor-pointer hover:shadow-xs transition duration-150 flex flex-col justify-between gap-2.5 relative min-w-0 w-full overflow-hidden box-border"
                                     onClick={() => setSelectedId(c.id)}
                                   >
                                     {/* Header Badges */}
@@ -2263,11 +2416,10 @@ export default function CandidatePanel({
 
                                     {/* Guidance Alert or Level Tag */}
                                     {c.guidanceAlert && c.vacancyId ? (
-                                      <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold min-w-0 w-full overflow-hidden shrink-0 ${
-                                        c.guidanceGapDetails?.includes('INCOMPATIBILIDAD CRÍTICA') || (c.fitScore && c.fitScore <= 25)
+                                      <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold min-w-0 w-full overflow-hidden shrink-0 ${c.guidanceGapDetails?.includes('INCOMPATIBILIDAD CRÍTICA') || (c.fitScore && c.fitScore <= 25)
                                           ? 'bg-rose-100 border border-rose-300 text-rose-900 font-black'
                                           : 'bg-rose-50 border border-rose-200 text-rose-800'
-                                      }`} title={c.guidanceGapDetails}>
+                                        }`} title={c.guidanceGapDetails}>
                                         <AlertTriangle size={12} className="shrink-0 text-rose-600" />
                                         <span className="truncate">
                                           {c.guidanceGapDetails?.includes('INCOMPATIBILIDAD CRÍTICA') || (c.fitScore && c.fitScore <= 25)
@@ -2304,13 +2456,13 @@ export default function CandidatePanel({
                                         onClick={(e) => e.stopPropagation()}
                                         onChange={(e) => moveStage(c, e.target.value as CandidateStage)}
                                         className="flex-1 min-w-0 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 text-[12px] font-bold text-slate-800 focus:outline-none cursor-pointer appearance-none truncate"
-                                        style={{ 
+                                        style={{
                                           width: 'auto',
                                           maxWidth: '100%',
-                                          backgroundPosition: 'right 6px center', 
-                                          backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23475569' stroke-width='2' viewBox='0 0 24 24'><path stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/></svg>")`, 
-                                          backgroundRepeat: 'no-repeat', 
-                                          paddingRight: '22px' 
+                                          backgroundPosition: 'right 6px center',
+                                          backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23475569' stroke-width='2' viewBox='0 0 24 24'><path stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/></svg>")`,
+                                          backgroundRepeat: 'no-repeat',
+                                          paddingRight: '22px'
                                         }}
                                       >
                                         {STAGES.map((s) => (
@@ -2372,8 +2524,8 @@ export default function CandidatePanel({
                       {selected.fitScore > selected.initialFitScore
                         ? `+${selected.fitScore - selected.initialFitScore}% Ajuste Vacante (Base CV ${selected.initialFitScore}%)`
                         : selected.fitScore < selected.initialFitScore
-                        ? `-${selected.initialFitScore - selected.fitScore}% Brecha Vacante (Base CV ${selected.initialFitScore}%)`
-                        : `Score Base CV: ${selected.fitScore}%`}
+                          ? `-${selected.initialFitScore - selected.fitScore}% Brecha Vacante (Base CV ${selected.initialFitScore}%)`
+                          : `Score Base CV: ${selected.fitScore}%`}
                     </span>
                   )}
                 </div>
@@ -2435,8 +2587,8 @@ export default function CandidatePanel({
                       const isPool = !newVacId;
                       const targetVac = isPool ? undefined : vacancies.find(v => v.id === newVacId);
                       const strictEval = calculateStrictFitScore(selected, targetVac);
-                      const updatedLocally: Candidate = { 
-                        ...selected, 
+                      const updatedLocally: Candidate = {
+                        ...selected,
                         vacancyId: isPool ? undefined : newVacId,
                         stage: isPool ? 'Pool' : (selected.stage === 'Pool' ? 'Filtrado' : selected.stage),
                         fitScore: strictEval.fitScore,
@@ -2545,924 +2697,934 @@ export default function CandidatePanel({
 
             {/* Scrollable Tab contents wrapper */}
             <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4, display: 'flex', flexDirection: 'column' }}>
-            {detailsTab === 'fitMatrix' && (
-              <div className="py-2">
-                <CandidateFitMatrix
-                  candidate={selected}
-                  vacancy={vacancies.find(v => v.id === selected.vacancyId)}
-                />
-              </div>
-            )}
-            {detailsTab === 'profile' && (
+              {detailsTab === 'fitMatrix' && (
+                <div className="py-2">
+                  <CandidateFitMatrix
+                    candidate={selected}
+                    vacancy={vacancies.find(v => v.id === selected.vacancyId)}
+                  />
+                </div>
+              )}
+              {detailsTab === 'profile' && (
 
-              <>
-                {/* Ficha de Datos Personales y de Contacto */}
-                <div style={{
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 10,
-                  padding: '10px 14px',
-                  marginBottom: 14,
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: '12px 24px',
-                  alignItems: 'center'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                    <Mail size={14} style={{ color: '#4f46e5' }} />
-                    <span style={{ fontWeight: 600, color: '#475569' }}>Email:</span>
-                    <a href={`mailto:${selected.email}`} style={{ color: '#0f172a', fontWeight: 'bold', textDecoration: 'underline' }}>
-                      {selected.email || 'No especificado'}
-                    </a>
-                    {selected.email && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ padding: '2px 4px', fontSize: 10, height: 'auto', color: '#64748b' }}
-                        onClick={() => {
-                          navigator.clipboard.writeText(selected.email);
-                          alert('Email copiado al portapapeles');
-                        }}
-                        title="Copiar email"
-                      >
-                        <Copy size={11} />
-                      </button>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                    <Phone size={14} style={{ color: '#059669' }} />
-                    <span style={{ fontWeight: 600, color: '#475569' }}>Teléfono:</span>
-                    <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{selected.phone || 'No registrado'}</span>
-                    {selected.phone && (
-                      <>
-                        <a
-                          href={`tel:${selected.phone}`}
+                <>
+                  {/* Ficha de Datos Personales y de Contacto */}
+                  <div style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 10,
+                    padding: '10px 14px',
+                    marginBottom: 14,
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '12px 24px',
+                    alignItems: 'center'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                      <Mail size={14} style={{ color: '#4f46e5' }} />
+                      <span style={{ fontWeight: 600, color: '#475569' }}>Email:</span>
+                      <a href={`mailto:${selected.email}`} style={{ color: '#0f172a', fontWeight: 'bold', textDecoration: 'underline' }}>
+                        {selected.email || 'No especificado'}
+                      </a>
+                      {selected.email && (
+                        <button
+                          type="button"
                           className="btn btn-ghost"
-                          style={{ padding: '2px 6px', fontSize: 10, height: 'auto', color: '#059669', border: '1px solid #a7f3d0', borderRadius: 4 }}
-                          title="Llamar"
+                          style={{ padding: '2px 4px', fontSize: 10, height: 'auto', color: '#64748b' }}
+                          onClick={() => {
+                            navigator.clipboard.writeText(selected.email);
+                            alert('Email copiado al portapapeles');
+                          }}
+                          title="Copiar email"
                         >
-                          Llamar
-                        </a>
-                        <a
-                          href={`https://wa.me/${selected.phone.replace(/[^0-9]/g, '')}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn btn-ghost"
-                          style={{ padding: '2px 6px', fontSize: 10, height: 'auto', color: '#059669', fontWeight: 'bold', border: '1px solid #a7f3d0', borderRadius: 4, background: '#ecfdf5' }}
-                          title="Abrir WhatsApp"
-                        >
-                          WhatsApp
-                        </a>
-                      </>
-                    )}
+                          <Copy size={11} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                      <Phone size={14} style={{ color: '#059669' }} />
+                      <span style={{ fontWeight: 600, color: '#475569' }}>Teléfono:</span>
+                      <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{selected.phone || 'No registrado'}</span>
+                      {selected.phone && (
+                        <>
+                          <a
+                            href={`tel:${selected.phone}`}
+                            className="btn btn-ghost"
+                            style={{ padding: '2px 6px', fontSize: 10, height: 'auto', color: '#059669', border: '1px solid #a7f3d0', borderRadius: 4 }}
+                            title="Llamar"
+                          >
+                            Llamar
+                          </a>
+                          <a
+                            href={`https://wa.me/${selected.phone.replace(/[^0-9]/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-ghost"
+                            style={{ padding: '2px 6px', fontSize: 10, height: 'auto', color: '#059669', fontWeight: 'bold', border: '1px solid #a7f3d0', borderRadius: 4, background: '#ecfdf5' }}
+                            title="Abrir WhatsApp"
+                          >
+                            WhatsApp
+                          </a>
+                        </>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                      <MapPin size={14} style={{ color: '#d97706' }} />
+                      <span style={{ fontWeight: 600, color: '#475569' }}>Ubicación:</span>
+                      <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{extractLocationFromResume(selected.resumeText)}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                      <span style={{ fontWeight: 600, color: '#475569' }}>Canal de Origen:</span>
+                      <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 'bold' }}>
+                        {selected.channel === 'EAS Consulting DB' ? 'Base de Talento' : (selected.channel || 'Postulación')}
+                      </span>
+                    </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                    <MapPin size={14} style={{ color: '#d97706' }} />
-                    <span style={{ fontWeight: 600, color: '#475569' }}>Ubicación:</span>
-                    <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{extractLocationFromResume(selected.resumeText)}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+                    <FitGauge value={selected.fitScore} initialValue={selected.initialFitScore} size={64} />
+                    <div>
+                      <p style={{ fontSize: 13, color: 'var(--text-mid)', margin: 0, lineHeight: 1.6 }}>{cleanEnginePrefix(selected.summary)}</p>
+                    </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                    <span style={{ fontWeight: 600, color: '#475569' }}>Canal de Origen:</span>
-                    <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 'bold' }}>
-                      {selected.channel === 'EAS Consulting DB' ? 'Base de Talento' : (selected.channel || 'Postulación')}
+                  <div className="tag-list" style={{ marginBottom: 18 }}>
+                    <span className="badge badge-neutral">Inglés {selected.englishLevel}</span>
+                    <span className="badge badge-neutral">
+                      Sueldo pretendido {selected.expectedSalary && !isNaN(selected.expectedSalary) ? new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(selected.expectedSalary) : 'No especificado'}
                     </span>
                   </div>
-                </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                  <FitGauge value={selected.fitScore} initialValue={selected.initialFitScore} size={64} />
-                  <div>
-                    <p style={{ fontSize: 13, color: 'var(--text-mid)', margin: 0, lineHeight: 1.6 }}>{cleanEnginePrefix(selected.summary)}</p>
-                  </div>
-                </div>
-
-                <div className="tag-list" style={{ marginBottom: 18 }}>
-                  <span className="badge badge-neutral">Inglés {selected.englishLevel}</span>
-                  <span className="badge badge-neutral">
-                    Sueldo pretendido {selected.expectedSalary && !isNaN(selected.expectedSalary) ? new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(selected.expectedSalary) : 'No especificado'}
-                  </span>
-                </div>
-
-                {selected.doubleCheckReport && (() => {
-                  // Color según el veredicto (antes siempre verde, aunque el dictamen fuera negativo)
-                  const r = selected.doubleCheckReport || '';
-                  const tone = /NO APROBADO/.test(r) ? { bg: 'rgba(239,68,68,0.06)', bd: 'rgba(239,68,68,0.35)', fg: '#b91c1c' }
-                    : /NO CONCLUYENTE|CON RESERVAS/.test(r) ? { bg: 'rgba(245,158,11,0.07)', bd: 'rgba(245,158,11,0.4)', fg: '#b45309' }
-                    : { bg: 'rgba(16,185,129,0.06)', bd: 'rgba(16,185,129,0.25)', fg: 'var(--success)' };
-                  return (
-                  <div className="card" style={{ padding: 12, marginBottom: 18, borderRadius: 10, backgroundColor: tone.bg, border: `1px solid ${tone.bd}` }}>
-                    <h4 style={{ fontSize: 12, fontWeight: 'bold', color: tone.fg, margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Sparkles size={14} /> Validación de Coherencia (Doble Validación / Double-Check)
-                    </h4>
-                    <p style={{ fontSize: 11.5, color: 'var(--text-high)', margin: 0, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
-                      {cleanEnginePrefix(selected.doubleCheckReport)}
-                    </p>
-                  </div>
-                  );
-                })()}
-
-                {selectedVacancy ? (
-                  <>
-                    {/* Ficha Técnica & Requisición de Puesto Asignado */}
-                    <div className="card" style={{ padding: 14, marginBottom: 18, borderRadius: 12, backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <Briefcase size={16} style={{ color: '#4338ca' }} />
-                          <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: 0, color: '#0f172a' }}>
-                            {selectedVacancy.title}
-                          </h4>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Vacante Vinculada:</span>
-                          <select
-                            value={(selected.stage === 'Pool' ? 'unassigned' : (selected.vacancyId || 'unassigned'))}
-                            onChange={async (e) => {
-                              const newVacId = e.target.value === 'unassigned' ? '' : e.target.value;
-                              const newStage = newVacId ? (selected.stage === 'Pool' ? 'Filtrado' : selected.stage) : 'Pool';
-                              const targetVac = newVacId ? vacancies.find(v => v.id === newVacId) : undefined;
-                              const strictEval = calculateStrictFitScore(selected, targetVac);
-                              const updatedCompetencies = calculateCandidateCompetencies(selected, targetVac);
-                              const updatedSummary = synthesizeAnalyticalCandidateSummary(selected, targetVac);
-                              const updatedCandidate: Candidate = { 
-                                ...selected, 
-                                vacancyId: newVacId, 
-                                stage: newStage,
-                                fitScore: strictEval.fitScore,
-                                initialFitScore: strictEval.initialFitScore,
-                                competencies: updatedCompetencies,
-                                summary: updatedSummary,
-                                strengths: strictEval.strengths,
-                                growths: strictEval.growths
-                              };
-                              onCandidateUpdated(updatedCandidate);
-                              try {
-                                const customKey = localStorage.getItem('eas_gemini_key') || '';
-                                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                                if (customKey) headers['x-gemini-api-key'] = customKey;
-
-                                const updateRes = await authFetch(`/api/candidates/${selected.id}`, {
-                                  method: 'PATCH',
-                                  headers,
-                                  body: JSON.stringify({
-                                    vacancyId: newVacId,
-                                    stage: newStage,
-                                    forceRegenerate: true
-                                  })
-                                });
-                                const resData = await updateRes.json().catch(() => ({}));
-                                if (!updateRes.ok) throw new Error(resData.message || resData.error || `HTTP ${updateRes.status}`);
-                                if (resData.candidate) {
-                                  onCandidateUpdated({ ...selected, ...resData.candidate });
-                                }
-                              } catch (err: any) {
-                                onCandidateUpdated(selected);
-                                alert(`⚠️ El cambio NO se guardó en el servidor: ${err?.message || err}`);
-                              }
-                            }}
-                            style={{
-                              padding: '3px 8px',
-                              borderRadius: 8,
-                              fontSize: 11,
-                              fontWeight: 'bold',
-                              border: '1px solid #a5b4fc',
-                              backgroundColor: '#ffffff',
-                              color: '#3730a3',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            <option value="unassigned">⭐ Talent Pool (Sin vacante asignada)</option>
-                            {vacancies.map(v => (
-                              <option key={v.id} value={v.id}>{v.title}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#475569', marginBottom: 10, flexWrap: 'wrap' }}>
-                        <span>📍 <strong>Ubicación:</strong> {selectedVacancy.location}</span>
-                        <span>⌛ <strong>Experiencia requerida:</strong> {selectedVacancy.experienceYears}+ años</span>
-                        <span>💵 <strong>Tabulador de la vacante:</strong> <strong style={{ color: '#059669' }}>{selectedVacancy.salaryRange || 'No especificado'}</strong></span>
-                        <span>🌐 <strong>Inglés:</strong> {selectedVacancy.englishLevel}</span>
-                      </div>
-
-                      <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 10, fontSize: 11.5, color: '#334155', lineHeight: 1.5, marginBottom: 10 }}>
-                        <strong style={{ color: '#1e1b4b', display: 'block', marginBottom: 4 }}>📋 Descripción & Observaciones Adicionales de la Vacante:</strong>
-                        <p style={{ margin: 0, whiteSpace: 'pre-line' }}>
-                          {selectedVacancy.description || 'Consultor experto en implementación integral (end-to-end) de SAP S/4HANA en el módulo especificado.'}
+                  {selected.doubleCheckReport && (() => {
+                    // Color según el veredicto (antes siempre verde, aunque el dictamen fuera negativo)
+                    const r = selected.doubleCheckReport || '';
+                    const tone = /NO APROBADO/.test(r) ? { bg: 'rgba(239,68,68,0.06)', bd: 'rgba(239,68,68,0.35)', fg: '#b91c1c' }
+                      : /NO CONCLUYENTE|CON RESERVAS/.test(r) ? { bg: 'rgba(245,158,11,0.07)', bd: 'rgba(245,158,11,0.4)', fg: '#b45309' }
+                        : { bg: 'rgba(16,185,129,0.06)', bd: 'rgba(16,185,129,0.25)', fg: 'var(--success)' };
+                    return (
+                      <div className="card" style={{ padding: 12, marginBottom: 18, borderRadius: 10, backgroundColor: tone.bg, border: `1px solid ${tone.bd}` }}>
+                        <h4 style={{ fontSize: 12, fontWeight: 'bold', color: tone.fg, margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Sparkles size={14} /> Validación de Coherencia (Doble Validación / Double-Check)
+                        </h4>
+                        <p style={{ fontSize: 11.5, color: 'var(--text-high)', margin: 0, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                          {cleanEnginePrefix(selected.doubleCheckReport)}
                         </p>
                       </div>
+                    );
+                  })()}
 
-                      {/* Interpretación IA de Perfiles Incluidos y Ponderación de Peso */}
-                      {(() => {
-                        const profiles = interpretVacancyProfileWeights(selectedVacancy);
-                        return (
-                          <div style={{ backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8, padding: '10px 12px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                              <span style={{ fontSize: 11, fontWeight: 800, color: '#312e81', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                                Interpretación IA de Perfiles en Vacante & Peso de Evaluación
-                              </span>
-                              <span style={{ fontSize: 10, fontWeight: 700, color: '#4338ca', backgroundColor: '#e0e7ff', padding: '2px 7px', borderRadius: 10 }}>
-                                Perfil Principal: {profiles[0]?.profile} ({profiles[0]?.weight}%)
-                              </span>
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                              {profiles.map((p, idx) => (
-                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
-                                    <span style={{ fontWeight: idx === 0 ? 800 : 600, color: idx === 0 ? '#1e1b4b' : '#334155' }}>
-                                      {p.profile} <span style={{ fontSize: 10, color: '#6366f1', fontWeight: 700 }}>[{p.roleType}]</span>
-                                      {p.focusAreas.length > 0 && (
-                                        <span style={{ fontSize: 10, color: '#64748b', marginLeft: 6 }}>
-                                          ({p.focusAreas.slice(0, 3).join(', ')})
-                                        </span>
-                                      )}
-                                    </span>
-                                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: idx === 0 ? '#4338ca' : '#475569' }}>
-                                      {p.weight}%
-                                    </span>
-                                  </div>
-                                  <div style={{ height: 5, backgroundColor: '#dbeafe', borderRadius: 4, overflow: 'hidden' }}>
-                                    <div
-                                      style={{
-                                        width: `${p.weight}%`,
-                                        height: '100%',
-                                        background: idx === 0 ? 'linear-gradient(90deg, #4f46e5, #059669)' : '#818cf8',
-                                        borderRadius: 4
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                  {selectedVacancy ? (
+                    <>
+                      {/* Ficha Técnica & Requisición de Puesto Asignado */}
+                      <div className="card" style={{ padding: 14, marginBottom: 18, borderRadius: 12, backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Briefcase size={16} style={{ color: '#4338ca' }} />
+                            <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: 0, color: '#0f172a' }}>
+                              {selectedVacancy.title}
+                            </h4>
                           </div>
-                        );
-                      })()}
-                    </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Vacante Vinculada:</span>
+                            <select
+                              value={(selected.stage === 'Pool' ? 'unassigned' : (selected.vacancyId || 'unassigned'))}
+                              onChange={async (e) => {
+                                const newVacId = e.target.value === 'unassigned' ? '' : e.target.value;
+                                const newStage = newVacId ? (selected.stage === 'Pool' ? 'Filtrado' : selected.stage) : 'Pool';
+                                const targetVac = newVacId ? vacancies.find(v => v.id === newVacId) : undefined;
+                                const strictEval = calculateStrictFitScore(selected, targetVac);
+                                const updatedCompetencies = calculateCandidateCompetencies(selected, targetVac);
+                                const updatedSummary = synthesizeAnalyticalCandidateSummary(selected, targetVac);
+                                const updatedCandidate: Candidate = {
+                                  ...selected,
+                                  vacancyId: newVacId,
+                                  stage: newStage,
+                                  fitScore: strictEval.fitScore,
+                                  initialFitScore: strictEval.initialFitScore,
+                                  competencies: updatedCompetencies,
+                                  summary: updatedSummary,
+                                  strengths: strictEval.strengths,
+                                  growths: strictEval.growths
+                                };
+                                onCandidateUpdated(updatedCandidate);
+                                try {
+                                  const customKey = localStorage.getItem('eas_gemini_key') || '';
+                                  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                                  if (customKey) headers['x-gemini-api-key'] = customKey;
 
-                    <h3 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-low)', marginBottom: 10 }}>
-                      Auditoría de brechas vs. mínimos de la vacante
-                    </h3>
-                    {COMPETENCY_KEYS.map((k) => {
-                      const score = (selected.competencies || {})[k] ?? 50;
-                      const min = (selectedVacancy.minCompetenciesRequired || {})[k] ?? 60;
-                      const gap = score - min;
-                      return (
-                        <div key={k} style={{ marginBottom: 10 }}>
-                          <div className="slider-label">
-                            <span>{k}</span>
-                            <span style={{ color: gap >= 0 ? 'var(--success)' : 'var(--danger)', fontFamily: 'var(--font-mono)' }}>
-                              {score} <span style={{ color: 'var(--text-low)' }}>/ mín. {min}</span>
-                            </span>
-                          </div>
-                          <div className="gov-bar-track">
-                            <div
-                              className="gov-bar-fill"
-                              style={{
-                                width: `${score}%`,
-                                background: gap >= 0 ? 'linear-gradient(90deg, var(--brass), var(--success))' : 'var(--danger)'
+                                  const updateRes = await authFetch(`/api/candidates/${selected.id}`, {
+                                    method: 'PATCH',
+                                    headers,
+                                    body: JSON.stringify({
+                                      vacancyId: newVacId,
+                                      stage: newStage,
+                                      forceRegenerate: true
+                                    })
+                                  });
+                                  const resData = await updateRes.json().catch(() => ({}));
+                                  if (!updateRes.ok) throw new Error(resData.message || resData.error || `HTTP ${updateRes.status}`);
+                                  if (resData.candidate) {
+                                    onCandidateUpdated({ ...selected, ...resData.candidate });
+                                  }
+                                } catch (err: any) {
+                                  onCandidateUpdated(selected);
+                                  alert(`⚠️ El cambio NO se guardó en el servidor: ${err?.message || err}`);
+                                }
                               }}
-                            />
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: 8,
+                                fontSize: 11,
+                                fontWeight: 'bold',
+                                border: '1px solid #a5b4fc',
+                                backgroundColor: '#ffffff',
+                                color: '#3730a3',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <option value="unassigned">⭐ Talent Pool (Sin vacante asignada)</option>
+                              {vacancies.map(v => (
+                                <option key={v.id} value={v.id}>{v.title}</option>
+                              ))}
+                            </select>
                           </div>
                         </div>
-                      );
-                    })}
-                    <hr className="divider" style={{ margin: '14px 0' }} />
-                  </>
-                ) : (
-                  <>
-                    {/* Ficha Técnica para Candidato en Talent Pool (Sin Vacante) */}
-                    <div className="card" style={{ padding: 14, marginBottom: 18, borderRadius: 12, backgroundColor: '#f0f9ff', border: '1px solid #bae6fd' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <Sparkles size={16} style={{ color: '#0284c7' }} />
-                          <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: 0, color: '#0369a1' }}>
-                            ⭐ Talent Pool (Candidato Sin Asignación de Vacante)
-                          </h4>
+
+                        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#475569', marginBottom: 10, flexWrap: 'wrap' }}>
+                          <span>📍 <strong>Ubicación:</strong> {selectedVacancy.location}</span>
+                          <span>⌛ <strong>Experiencia requerida:</strong> {selectedVacancy.experienceYears}+ años</span>
+                          <span>💵 <strong>Tabulador de la vacante:</strong> <strong style={{ color: '#059669' }}>{selectedVacancy.salaryRange || 'No especificado'}</strong></span>
+                          <span>🌐 <strong>Inglés:</strong> {selectedVacancy.englishLevel}</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: 11, fontWeight: 'bold', color: '#0369a1' }}>Asignar a Vacante:</span>
-                          <select
-                            value={(selected.stage === 'Pool' ? 'unassigned' : (selected.vacancyId || 'unassigned'))}
-                            onChange={async (e) => {
-                              const newVacId = e.target.value === 'unassigned' ? '' : e.target.value;
-                              const newStage = newVacId ? (selected.stage === 'Pool' ? 'Filtrado' : selected.stage) : 'Pool';
-                              const targetVac = newVacId ? vacancies.find(v => v.id === newVacId) : undefined;
-                              const strictEval = calculateStrictFitScore(selected, targetVac);
-                              const updatedCompetencies = calculateCandidateCompetencies(selected, targetVac);
-                              const updatedSummary = synthesizeAnalyticalCandidateSummary(selected, targetVac);
-                              const updatedCandidate: Candidate = { 
-                                ...selected, 
-                                vacancyId: newVacId, 
-                                stage: newStage,
-                                fitScore: strictEval.fitScore,
-                                initialFitScore: strictEval.initialFitScore,
-                                competencies: updatedCompetencies,
-                                summary: updatedSummary,
-                                strengths: strictEval.strengths,
-                                growths: strictEval.growths
-                              };
-                              onCandidateUpdated(updatedCandidate);
-                              try {
-                                const customKey = localStorage.getItem('eas_gemini_key') || '';
-                                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                                if (customKey) headers['x-gemini-api-key'] = customKey;
 
-                                const updateRes = await authFetch(`/api/candidates/${selected.id}`, {
-                                  method: 'PATCH',
-                                  headers,
-                                  body: JSON.stringify({
-                                    vacancyId: newVacId,
-                                    stage: newStage,
-                                    forceRegenerate: true
-                                  })
-                                });
-                                const resData = await updateRes.json().catch(() => ({}));
-                                if (!updateRes.ok) throw new Error(resData.message || resData.error || `HTTP ${updateRes.status}`);
-                                if (resData.candidate) {
-                                  onCandidateUpdated({ ...selected, ...resData.candidate });
-                                }
-                              } catch (err: any) {
-                                onCandidateUpdated(selected);
-                                alert(`⚠️ El cambio NO se guardó en el servidor: ${err?.message || err}`);
-                              }
-                            }}
-                            style={{
-                              padding: '3px 8px',
-                              borderRadius: 8,
-                              fontSize: 11,
-                              fontWeight: 'bold',
-                              border: '1px solid #0284c7',
-                              backgroundColor: '#ffffff',
-                              color: '#0369a1',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            <option value="unassigned">⭐ Talent Pool (Sin vacante asignada)</option>
-                            {vacancies.map(v => (
-                              <option key={v.id} value={v.id}>{v.title}</option>
-                            ))}
-                          </select>
+                        <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 10, fontSize: 11.5, color: '#334155', lineHeight: 1.5, marginBottom: 10 }}>
+                          <strong style={{ color: '#1e1b4b', display: 'block', marginBottom: 4 }}>📋 Descripción & Observaciones Adicionales de la Vacante:</strong>
+                          <p style={{ margin: 0, whiteSpace: 'pre-line' }}>
+                            {selectedVacancy.description || 'Consultor experto en implementación integral (end-to-end) de SAP S/4HANA en el módulo especificado.'}
+                          </p>
                         </div>
-                      </div>
 
-                      <div style={{ backgroundColor: '#ffffff', border: '1px solid #e0f2fe', borderRadius: 8, padding: 10, fontSize: 11.5, color: '#0c4a6e', lineHeight: 1.5 }}>
-                        <strong style={{ color: '#0369a1', display: 'block', marginBottom: 4 }}>💡 Justificación del Score en Talent Pool ({selected.fitScore}%):</strong>
-                        <p style={{ margin: 0 }}>
-                          Este candidato pertenece al <strong>Talent Pool (Sin Asignación de Vacante)</strong>. Su score actual (<strong>{selected.fitScore}%</strong>) representa su <strong>Idoneidad General de Consultoría EAS</strong> (evaluada a partir de soft skills, trayectoria profesional e inglés). Para realizar una auditoría de brechas contra un puesto específico y generar su Cuestionario de Doble Check personalizado, asigna una vacante al candidato en el menú desplegable superior.
-                        </p>
-                      </div>
-                    </div>
-                    <hr className="divider" style={{ margin: '14px 0' }} />
-                  </>
-                )}
-
-                {/* Cross-Vacancy Recommendation Panel (Talent Pool Optimizer) */}
-                <div style={{ marginTop: 14, marginBottom: 14 }}>
-                  <h3 style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-low)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Sparkles size={13} style={{ color: 'var(--brass-light)' }} /> Optimización de Ajuste Cruzado (Talent Pool Optimizer)
-                  </h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {vacancies
-                      .filter(v => v.id !== selected.vacancyId && v.status !== 'Closed')
-                      .map(v => {
-                        const evalRes = calculateStrictFitScore(selected, v);
-                        const score = evalRes.fitScore;
-                        const isMismatch = evalRes.hasDomainMismatch || score <= 34;
-                        const isBetter = !isMismatch && score >= 80 && score > selected.fitScore;
-                        return (
-                          <div 
-                            key={v.id} 
-                            style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between', 
-                              alignItems: 'center', 
-                              padding: '8px 10px', 
-                              borderRadius: 6, 
-                              background: isMismatch ? 'rgba(239,68,68,0.04)' : isBetter ? 'rgba(16,185,129,0.06)' : 'rgba(255,255,255,0.02)',
-                              border: isMismatch ? '1px solid rgba(239,68,68,0.2)' : isBetter ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(255,255,255,0.05)',
-                              fontSize: 12
-                            }}
-                            title={isMismatch ? (evalRes.mismatchReason || 'Incompatibilidad de perfil') : undefined}
-                          >
-                            <div>
-                              <span style={{ fontWeight: 'bold', color: 'var(--text-high)' }}>{v.title}</span>
-                              <span style={{ fontSize: 10, color: 'var(--text-low)', marginLeft: 8 }}>{v.department}</span>
+                        {/* Interpretación IA de Perfiles Incluidos y Ponderación de Peso */}
+                        {(() => {
+                          const profiles = interpretVacancyProfileWeights(selectedVacancy);
+                          return (
+                            <div style={{ backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8, padding: '10px 12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <span style={{ fontSize: 11, fontWeight: 800, color: '#312e81', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                                  Interpretación IA de Perfiles en Vacante & Peso de Evaluación
+                                </span>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: '#4338ca', backgroundColor: '#e0e7ff', padding: '2px 7px', borderRadius: 10 }}>
+                                  Perfil Principal: {profiles[0]?.profile} ({profiles[0]?.weight}%)
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {profiles.map((p, idx) => (
+                                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                                      <span style={{ fontWeight: idx === 0 ? 800 : 600, color: idx === 0 ? '#1e1b4b' : '#334155' }}>
+                                        {p.profile} <span style={{ fontSize: 10, color: '#6366f1', fontWeight: 700 }}>[{p.roleType}]</span>
+                                        {p.focusAreas.length > 0 && (
+                                          <span style={{ fontSize: 10, color: '#64748b', marginLeft: 6 }}>
+                                            ({p.focusAreas.slice(0, 3).join(', ')})
+                                          </span>
+                                        )}
+                                      </span>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: idx === 0 ? '#4338ca' : '#475569' }}>
+                                        {p.weight}%
+                                      </span>
+                                    </div>
+                                    <div style={{ height: 5, backgroundColor: '#dbeafe', borderRadius: 4, overflow: 'hidden' }}>
+                                      <div
+                                        style={{
+                                          width: `${p.weight}%`,
+                                          height: '100%',
+                                          background: idx === 0 ? 'linear-gradient(90deg, #4f46e5, #059669)' : '#818cf8',
+                                          borderRadius: 4
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              {isMismatch ? (
-                                <span 
-                                  style={{ 
-                                    fontSize: 9, 
-                                    padding: '2px 6px', 
-                                    borderRadius: 4, 
-                                    backgroundColor: 'rgba(239,68,68,0.15)', 
-                                    color: '#f87171', 
-                                    fontWeight: 'bold',
-                                    border: '1px solid rgba(239,68,68,0.3)'
-                                  }}
-                                >
-                                  INCOMPATIBLE
-                                </span>
-                              ) : isBetter ? (
-                                <span 
-                                  style={{ 
-                                    fontSize: 9, 
-                                    padding: '2px 6px', 
-                                    borderRadius: 4, 
-                                    backgroundColor: 'var(--success)', 
-                                    color: '#000', 
-                                    fontWeight: 'bold' 
-                                  }}
-                                >
-                                  MAYOR AJUSTE
-                                </span>
-                              ) : null}
-                              <span style={{ fontWeight: 'bold', color: isMismatch ? '#f87171' : isBetter ? 'var(--success)' : 'var(--text-low)' }}>
-                                {score}%
+                          );
+                        })()}
+                      </div>
+
+                      <h3 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-low)', marginBottom: 10 }}>
+                        Auditoría de brechas vs. mínimos de la vacante
+                      </h3>
+                      {COMPETENCY_KEYS.map((k) => {
+                        const score = (selected.competencies || {})[k] ?? 50;
+                        const min = (selectedVacancy.minCompetenciesRequired || {})[k] ?? 60;
+                        const gap = score - min;
+                        return (
+                          <div key={k} style={{ marginBottom: 10 }}>
+                            <div className="slider-label">
+                              <span>{k}</span>
+                              <span style={{ color: gap >= 0 ? 'var(--success)' : 'var(--danger)', fontFamily: 'var(--font-mono)' }}>
+                                {score} <span style={{ color: 'var(--text-low)' }}>/ mín. {min}</span>
                               </span>
+                            </div>
+                            <div className="gov-bar-track">
+                              <div
+                                className="gov-bar-fill"
+                                style={{
+                                  width: `${score}%`,
+                                  background: gap >= 0 ? 'linear-gradient(90deg, var(--brass), var(--success))' : 'var(--danger)'
+                                }}
+                              />
                             </div>
                           </div>
                         );
                       })}
-                    {vacancies.filter(v => v.id !== selected.vacancyId && v.status !== 'Closed').length === 0 && (
-                      <p style={{ fontSize: 11.5, color: 'var(--text-low)', margin: 0, fontStyle: 'italic' }}>
-                        No hay otras vacantes activas para evaluar el ajuste cruzado.
-                      </p>
-                    )}
-                  </div>
-                </div>
+                      <hr className="divider" style={{ margin: '14px 0' }} />
+                    </>
+                  ) : (
+                    <>
+                      {/* Ficha Técnica para Candidato en Talent Pool (Sin Vacante) */}
+                      <div className="card" style={{ padding: 14, marginBottom: 18, borderRadius: 12, backgroundColor: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Sparkles size={16} style={{ color: '#0284c7' }} />
+                            <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: 0, color: '#0369a1' }}>
+                              ⭐ Talent Pool (Candidato Sin Asignación de Vacante)
+                            </h4>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 11, fontWeight: 'bold', color: '#0369a1' }}>Asignar a Vacante:</span>
+                            <select
+                              value={(selected.stage === 'Pool' ? 'unassigned' : (selected.vacancyId || 'unassigned'))}
+                              onChange={async (e) => {
+                                const newVacId = e.target.value === 'unassigned' ? '' : e.target.value;
+                                const newStage = newVacId ? (selected.stage === 'Pool' ? 'Filtrado' : selected.stage) : 'Pool';
+                                const targetVac = newVacId ? vacancies.find(v => v.id === newVacId) : undefined;
+                                const strictEval = calculateStrictFitScore(selected, targetVac);
+                                const updatedCompetencies = calculateCandidateCompetencies(selected, targetVac);
+                                const updatedSummary = synthesizeAnalyticalCandidateSummary(selected, targetVac);
+                                const updatedCandidate: Candidate = {
+                                  ...selected,
+                                  vacancyId: newVacId,
+                                  stage: newStage,
+                                  fitScore: strictEval.fitScore,
+                                  initialFitScore: strictEval.initialFitScore,
+                                  competencies: updatedCompetencies,
+                                  summary: updatedSummary,
+                                  strengths: strictEval.strengths,
+                                  growths: strictEval.growths
+                                };
+                                onCandidateUpdated(updatedCandidate);
+                                try {
+                                  const customKey = localStorage.getItem('eas_gemini_key') || '';
+                                  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                                  if (customKey) headers['x-gemini-api-key'] = customKey;
 
-                <div className="bento-grid">
-                  <div className="card bento-cell">
-                    <div className="bento-cell-title" style={{ color: 'var(--success)' }}>
-                      <TrendingUp size={14} /> Fortalezas
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12.5, color: 'var(--text-mid)' }}>
-                      {(selected.strengths || []).map((s, i) => (
-                        <li key={i} style={{ marginBottom: 5 }}>
-                          {s}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="card bento-cell">
-                    <div className="bento-cell-title" style={{ color: 'var(--warning)' }}>
-                      <TrendingDown size={14} /> Áreas de oportunidad
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12.5, color: 'var(--text-mid)' }}>
-                      {(selected.growths || []).map((s, i) => (
-                        <li key={i} style={{ marginBottom: 5 }}>
-                          {s}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-
-                {/* Información Importada del CV del Candidato */}
-                {(() => {
-                  const cvData = extractCvSectionsFromText(selected.resumeText || '');
-                  const rawExp = (Array.isArray(selected.experience) && selected.experience.length > 0) ? selected.experience : (Array.isArray(cvData?.experience) ? cvData.experience : []);
-                  const expList = normalizeCanonicalExperience(rawExp);
-                  const rawEdu = (Array.isArray(selected.education) && selected.education.length > 0) ? selected.education : (Array.isArray(cvData?.education) ? cvData.education : []);
-                  let eduList = normalizeCanonicalEducation(rawEdu);
-                  if (eduList.length === 0 && selected.resumeText) {
-                    eduList = normalizeCanonicalEducation(cvData?.education || []);
-                  }
-                  const rawCert = (Array.isArray(selected.certifications) && selected.certifications.length > 0) ? selected.certifications : (Array.isArray(cvData?.certifications) ? cvData.certifications : []);
-                  const certList = normalizeCanonicalCertifications(rawCert);
-
-                  return (
-                    <div className="card" style={{ padding: 14, marginTop: 12, borderRadius: 12, backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxSizing: 'border-box', overflow: 'visible' }}>
-                      <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 10px', color: '#1e1b4b', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Briefcase size={15} style={{ color: '#10b981' }} /> Información Extraída del CV (Trayectoria & Formación Completa)
-                      </h4>
-                      
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, boxSizing: 'border-box' }}>
-                        <div style={{ minWidth: 0, boxSizing: 'border-box' }}>
-                          <h5 style={{ fontSize: 11, fontWeight: 'bold', color: '#334155', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            💼 Experiencia Laboral (Últimos 3 Empleos)
-                          </h5>
-                          <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', fontSize: 11.5, color: '#475569', lineHeight: 1.45 }}>
-                            {expList.map((item, i) => {
-                              const formatted = formatWorkExperienceItem(item);
-                              return (
-                                <li key={i} style={{ marginBottom: 8, padding: 10, borderRadius: 8, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', wordBreak: 'break-word', overflowWrap: 'anywhere', boxSizing: 'border-box' }}>
-                                  <div><strong style={{ color: '#0f172a' }}>🏢 Dónde trabajó:</strong> <span style={{ color: '#2563eb', fontWeight: 600 }}>{formatted.company}</span></div>
-                                  <div><strong style={{ color: '#4338ca' }}>💼 Puesto ocupado:</strong> {formatted.position}</div>
-                                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>🗓️ <strong>Periodo de tiempo:</strong> {formatted.period}</div>
-                                  {formatted.details && (
-                                    <div style={{ fontSize: 10.5, color: '#334155', marginTop: 4, paddingTop: 4, borderTop: '1px dashed #cbd5e1' }}>
-                                      <strong>⚡ Responsabilidades / Logros Clave:</strong> {formatted.details}
-                                    </div>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
+                                  const updateRes = await authFetch(`/api/candidates/${selected.id}`, {
+                                    method: 'PATCH',
+                                    headers,
+                                    body: JSON.stringify({
+                                      vacancyId: newVacId,
+                                      stage: newStage,
+                                      forceRegenerate: true
+                                    })
+                                  });
+                                  const resData = await updateRes.json().catch(() => ({}));
+                                  if (!updateRes.ok) throw new Error(resData.message || resData.error || `HTTP ${updateRes.status}`);
+                                  if (resData.candidate) {
+                                    onCandidateUpdated({ ...selected, ...resData.candidate });
+                                  }
+                                } catch (err: any) {
+                                  onCandidateUpdated(selected);
+                                  alert(`⚠️ El cambio NO se guardó en el servidor: ${err?.message || err}`);
+                                }
+                              }}
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: 8,
+                                fontSize: 11,
+                                fontWeight: 'bold',
+                                border: '1px solid #0284c7',
+                                backgroundColor: '#ffffff',
+                                color: '#0369a1',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <option value="unassigned">⭐ Talent Pool (Sin vacante asignada)</option>
+                              {vacancies.map(v => (
+                                <option key={v.id} value={v.id}>{v.title}</option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
-                        <div style={{ minWidth: 0, boxSizing: 'border-box' }}>
-                          <h5 style={{ fontSize: 11, fontWeight: 'bold', color: '#334155', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            🎓 Educación & Grados Académicos (Dónde, Qué y Periodo)
-                          </h5>
-                          <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', fontSize: 11.5, color: '#475569', lineHeight: 1.45, marginBottom: 10 }}>
-                            {eduList.map((item, i) => {
-                              const formatted = formatEducationItem(item);
-                              return (
-                                <li key={i} style={{ marginBottom: 8, padding: 10, borderRadius: 8, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', wordBreak: 'break-word', overflowWrap: 'anywhere', boxSizing: 'border-box' }}>
-                                  <div><strong style={{ color: '#0f172a' }}>🏛️ Dónde estudió:</strong> <span style={{ color: '#059669', fontWeight: 600 }}>{formatted.institution}</span></div>
-                                  <div><strong style={{ color: '#4338ca' }}>🎓 Qué estudió:</strong> {formatted.degree}</div>
-                                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>🗓️ <strong>Periodo de tiempo:</strong> {formatted.period}</div>
-                                </li>
-                              );
-                            })}
-                          </ul>
 
-                          <h5 style={{ fontSize: 11, fontWeight: 'bold', color: '#334155', margin: '10px 0 6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            📜 Certificaciones & Cursos
-                          </h5>
-                          <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11.5, color: '#475569', lineHeight: 1.45, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                            {certList.map((item, i) => (
-                              <li key={i} style={{ marginBottom: 3 }}>{item}</li>
-                            ))}
-                          </ul>
+                        <div style={{ backgroundColor: '#ffffff', border: '1px solid #e0f2fe', borderRadius: 8, padding: 10, fontSize: 11.5, color: '#0c4a6e', lineHeight: 1.5 }}>
+                          <strong style={{ color: '#0369a1', display: 'block', marginBottom: 4 }}>💡 Justificación del Score en Talent Pool ({selected.fitScore}%):</strong>
+                          <p style={{ margin: 0 }}>
+                            Este candidato pertenece al <strong>Talent Pool (Sin Asignación de Vacante)</strong>. Su score actual (<strong>{selected.fitScore}%</strong>) representa su <strong>Idoneidad General de Consultoría EAS</strong> (evaluada a partir de soft skills, trayectoria profesional e inglés). Para realizar una auditoría de brechas contra un puesto específico y generar su Cuestionario de Doble Check personalizado, asigna una vacante al candidato en el menú desplegable superior.
+                          </p>
                         </div>
                       </div>
-
-                      {/* Visualizador de Contenido Completo del CV */}
-                      {selected.resumeText && selected.resumeText.length > 30 && (
-                        <details style={{ marginTop: 12, borderTop: '1px border-slate-200', paddingTop: 8 }}>
-                          <summary style={{ cursor: 'pointer', fontSize: 11.5, fontWeight: 'bold', color: '#4F46E5', userSelect: 'none' }}>
-                            📄 Ver Texto Completo Original del CV
-                          </summary>
-                          <div style={{ marginTop: 8, padding: 10, backgroundColor: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 11, color: '#334155', maxHeight: 300, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                            {selected.resumeText}
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* Retroalimentación Heurística y Calificación Estructurada */}
-                <div className="card" style={{ padding: 14, marginTop: 12, borderRadius: 12, border: '1px solid #cbd5e1', backgroundColor: '#f8fafc' }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 6px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Sparkles size={14} style={{ color: '#4f46e5' }} /> Evaluación Heurística & Calificación de Candidato
-                  </h4>
-                  <p style={{ fontSize: 11, color: '#475569', margin: '0 0 10px', lineHeight: 1.4 }}>
-                    Registra una evaluación cualitativa con evidencia técnica u operativa. Cada evaluación favorable ajusta <strong>+8 pts</strong>, una brecha crítica <strong>-10 pts</strong>, y una nota no modifica el puntaje.
-                  </p>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                    <div>
-                      <label style={{ fontSize: 10.5, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 3 }}>
-                        Dictamen de Calificación:
-                      </label>
-                      <select
-                        value={feedbackOutcome}
-                        onChange={(e) => setFeedbackOutcome(e.target.value as any)}
-                        style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 11.5, backgroundColor: '#ffffff', color: '#0f172a' }}
-                      >
-                        <option value="Hired">Favorable / Validación Exitosa (+8 pts)</option>
-                        <option value="Rejected">Desfavorable / Brecha Crítica (-10 pts)</option>
-                        <option value="Note">Nota Informativa / Seguimiento (0 pts)</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ fontSize: 10.5, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 3 }}>
-                        Dimensión Evaluada:
-                      </label>
-                      <select
-                        value={feedbackDimension}
-                        onChange={(e) => setFeedbackDimension(e.target.value)}
-                        style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 11.5, backgroundColor: '#ffffff', color: '#0f172a' }}
-                      >
-                        <option value="Evaluación Técnica de Perfil">Evaluación Técnica de Perfil</option>
-                        <option value="Entrevista por Competencias RH">Entrevista por Competencias RH</option>
-                        <option value="Validación de Experiencia y Proyectos">Validación de Experiencia y Proyectos</option>
-                        <option value="Alineación Salarial y Disponibilidad">Alineación Salarial y Disponibilidad</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <textarea
-                    rows={3}
-                    placeholder="Escribe la justificación y evidencia observable de la entrevista o evaluación técnica (mínimo 10 caracteres)..."
-                    value={commentsText}
-                    onChange={(e) => setCommentsText(e.target.value)}
-                    style={{
-                      width: '100%',
-                      backgroundColor: '#ffffff',
-                      border: '1px solid #cbd5e1',
-                      borderRadius: 8,
-                      padding: 8,
-                      fontSize: 11.5,
-                      color: '#0f172a',
-                      outline: 'none',
-                      resize: 'none',
-                      boxSizing: 'border-box',
-                      marginBottom: 8
-                    }}
-                  />
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 10.5, color: commentsText.trim().length >= 10 ? '#059669' : '#dc2626' }}>
-                      {commentsText.trim().length >= 10 ? 'Evidencia suficiente para calificación' : `Mínimo 10 caracteres (${commentsText.trim().length}/10)`}
-                    </span>
-                    <button
-                      onClick={handleSaveComments}
-                      disabled={savingComments || commentsText.trim().length < 10}
-                      className="btn btn-primary"
-                      style={{ padding: '6px 14px', fontSize: 11.5, fontWeight: 600 }}
-                    >
-                      {savingComments ? 'Guardando...' : 'Aplicar Evaluación y Actualizar Score'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Historial de Cambios en Kanban */}
-                <div className="card" style={{ padding: 12, marginTop: 12, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 6px', color: '#103268' }}>
-                    Historial de Cambios (Auditoría Kanban)
-                  </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {(selected.history || []).map((h, i) => (
-                      <div key={i} style={{ fontSize: 11, color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
-                        <span style={{ fontWeight: 'bold' }}>{new Date(h.timestamp).toLocaleString()}</span> — Cambió a <span className="px-1.5 py-0.5 rounded bg-slate-100 font-bold">{h.stage}</span> por <span style={{ fontStyle: 'italic' }}>{h.user}</span>
-                      </div>
-                    ))}
-                    {(!selected.history || selected.history.length === 0) && (
-                      <p style={{ fontSize: 11, color: 'var(--text-low)', margin: 0 }}>No hay cambios registrados en esta postulación.</p>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {detailsTab === 'doubleCheck' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div className="card" style={{ padding: 12, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 6px' }}>
-                    <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: 0, color: 'var(--brass)' }}>
-                      Cuestionario de Doble Validación (7 Preguntas)
-                    </h4>
-                    {(selected.vacancyId || selectedVacancy?.id) && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        disabled={isRegeneratingQuestions}
-                        style={{ fontSize: 11, padding: '2px 8px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: 4, height: 'auto', border: '1px solid #cbd5e1', borderRadius: 4 }}
-                        onClick={async () => {
-                          try {
-                            const targetVacId = selected.vacancyId || selectedVacancy?.id;
-                            if (!targetVacId) {
-                              alert("Por favor asigna primero una vacante al candidato.");
-                              return;
-                            }
-                            setIsRegeneratingQuestions(true);
-                            const customKey = localStorage.getItem('eas_gemini_key') || '';
-                            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                            if (customKey) headers['x-gemini-api-key'] = customKey;
-
-                            // Solo regenera las 3 preguntas de experiencia (nuevas y distintas a las actuales);
-                            // ya no re-evalúa el Fit Score del candidato.
-                            const res = await authFetch(`/api/candidates/${selected.id}/regenerate-questions`, {
-                              method: 'POST',
-                              headers
-                            });
-                            const resData = await res.json().catch(() => ({}));
-                            if (!res.ok) {
-                              throw new Error(resData.error || `Respuesta del servidor no válida (${res.status})`);
-                            }
-                            if (resData && resData.candidate) {
-                              onCandidateUpdated({ ...selected, ...resData.candidate });
-                            } else {
-                              throw new Error("No se devolvió información actualizada del candidato.");
-                            }
-                          } catch (err: any) {
-                            alert("Error al regenerar preguntas de la vacante: " + (err.message || String(err)));
-                          } finally {
-                            setIsRegeneratingQuestions(false);
-                          }
-                        }}
-                      >
-                        {isRegeneratingQuestions ? '⏳ Regenerando...' : '🔄 Regenerar'}
-                      </button>
-                    )}
-                  </div>
-                  <p style={{ fontSize: 12, color: 'var(--text-low)', margin: '0 0 10px' }}>
-                    Envía estas preguntas al candidato por correo electrónico para confrontar sus habilidades frente al CV.
-                  </p>
-                  
-                  <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, padding: 10, backgroundColor: '#f1f5f9', color: '#1e293b', marginBottom: 12 }}>
-                    <div style={{ fontWeight: 'bold', fontSize: 11, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, borderBottom: '1px solid #cbd5e1', paddingBottom: 2 }}>
-                      Experiencia (Preguntas Personalizadas Vacante-CV)
-                    </div>
-                    {(() => {
-                      const expQs = experienceQuestionsFor(selected, selectedVacancy);
-                      return expQs.map((qText, idx) => {
-                        const existingAns = answerFor(selected, qText);
-                        return (
-                          <div key={idx} style={{ fontSize: 12, marginBottom: 8, borderBottom: '1px solid #e2e8f0', paddingBottom: 6, color: '#334155' }}>
-                            <strong>Pregunta {idx + 1}:</strong> {qText}
-                            {existingAns && <div style={{ color: 'var(--success)', marginTop: 4, fontStyle: 'italic' }}>Resp: {existingAns}</div>}
-                            {!existingAns && selected.doubleCheckReport && <div style={{ color: 'var(--danger)', marginTop: 4, fontStyle: 'italic' }}>Sin respuesta</div>}
-                          </div>
-                        );
-                      });
-                    })()}
-
-                    <div style={{ fontWeight: 'bold', fontSize: 11, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 10, marginBottom: 6, borderBottom: '1px solid #cbd5e1', paddingBottom: 2 }}>
-                      Disponibilidad (4 Preguntas Fijas)
-                    </div>
-                    {FIXED_AVAILABILITY_QUESTIONS.map((fixedQ, idx) => {
-                      // Antes se leía la posición idx+3, que con el cuestionario de 4+4 del servidor
-                      // mostraba la 4ª pregunta de experiencia en lugar de la de disponibilidad.
-                      const qText = fixedQ;
-                      const ansText = answerFor(selected, fixedQ);
-                      return (
-                        <div key={idx + 4} style={{ fontSize: 12, marginBottom: 8, borderBottom: '1px solid #e2e8f0', paddingBottom: 6, color: '#334155' }}>
-                          <strong>Pregunta {idx + 4}:</strong> {qText}
-                          {ansText && <div style={{ color: 'var(--success)', marginTop: 4, fontStyle: 'italic' }}>Resp: {ansText}</div>}
-                          {!ansText && selected.doubleCheckReport && <div style={{ color: 'var(--danger)', marginTop: 4, fontStyle: 'italic' }}>Sin respuesta</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ fontSize: 11.5, flex: 1 }}
-                      onClick={async () => {
-                        const recruiterName = localStorage.getItem('eas_user_name') || userEmail.split('@')[0] || 'Atracción de Talento';
-                        const vacTitle = selectedVacancy?.title || selected.role || 'Nombre de la vacante';
-                        const source = selected.channel && selected.channel !== 'Otros' ? selected.channel : 'tu postulación';
-                        const expList = experienceQuestionsFor(selected, selectedVacancy);
-                        const expBlock = expList.map((q, i) => `${i + 1}. ${q}`).join('\n');
-
-                        const dispBlock = [
-                          "4. ¿Cuál es tu disponibilidad para integrarte a la vacante?",
-                          "5. ¿Cuál fue tu último sueldo mensual bruto (comprobable)?",
-                          "6. ¿Dónde te ubicas actualmente?",
-                          "7. ¿En qué modalidad de trabajo podrías colaborar (presencial, híbrido o remoto)?"
-                        ].join('\n');
-
-                        const cleanName = cleanCandidateName(selected.name, selected.resumeText, selected.email);
-                        const text = `¡Buen día ${cleanName}!\n\nEspero que te encuentres muy bien. Mi nombre es ${recruiterName}, te contacto del equipo de Atracción de Talento de EAS Consulting.\n\nSomos una empresa con más de 19 años de experiencia en implementación, consultoría y soporte de aplicaciones SAP. Actualmente buscamos reforzar nuestro equipo con un ${vacTitle}.\n\nRecibimos tu CV a través de ${source} y nos gustaría conocer un poco más sobre tu experiencia. ¿Nos apoyas respondiendo las siguientes preguntas?\n\n📌 NOTA IMPORTANTE: Por favor, en tus respuestas sobre experiencia incluye DATOS MEDIBLES Y CUANTIFICABLES (métricas, cifras, porcentajes de logro, volumen de proyectos, número de usuarios/módulos o resultados concretos), ya que nuestro proceso de evaluación valida la experiencia a través de indicadores medibles.\n\nExperiencia\n${expBlock}\n\nDisponibilidad\n${dispBlock}\n\nQuedo atenta a tus respuestas para, en caso de avanzar, coordinar una sesión y platicarte más sobre la vacante. ¡Muchas gracias por tu tiempo!`;
-                        const ok = await copyToClipboard(text);
-                        if (ok) {
-                          alert('¡Plantilla de correo copiada al portapapeles!');
-                        } else {
-                          alert('No se pudo copiar automáticamente. Por favor copia el texto manualmente.');
-                        }
-                      }}
-                    >
-                      <Copy size={12} /> Copiar Plantilla
-                    </button>
-                    
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ fontSize: 11.5, flex: 1 }}
-                      onClick={() => {
-                        const recruiterName = localStorage.getItem('eas_user_name') || userEmail.split('@')[0] || 'Atracción de Talento';
-                        const vacTitle = selectedVacancy?.title || selected.role || 'Nombre de la vacante';
-                        const source = selected.channel && selected.channel !== 'Otros' ? selected.channel : 'tu postulación';
-                        const expList = experienceQuestionsFor(selected, selectedVacancy);
-                        const expBlock = expList.map((q, i) => `${i + 1}. ${q}`).join('\n');
-
-                        const dispBlock = [
-                          "4. ¿Cuál es tu disponibilidad para integrarte a la vacante?",
-                          "5. ¿Cuál fue tu último sueldo mensual bruto (comprobable)?",
-                          "6. ¿Dónde te ubicas actualmente?",
-                          "7. ¿En qué modalidad de trabajo podrías colaborar (presencial, híbrido o remoto)?"
-                        ].join('\n');
-
-                        const cleanName = cleanCandidateName(selected.name, selected.resumeText, selected.email);
-                        const subjectText = `Vacante EAS | ${vacTitle}`;
-                        const bodyText = `¡Buen día ${cleanName}!\n\nEspero que te encuentres muy bien. Mi nombre es ${recruiterName}, te contacto del equipo de Atracción de Talento de EAS Consulting.\n\nSomos una empresa con más de 19 años de experiencia en implementación, consultoría y soporte de aplicaciones SAP. Actualmente buscamos reforzar nuestro equipo con un ${vacTitle}.\n\nRecibimos tu CV a través de ${source} y nos gustaría conocer un poco más sobre tu experiencia. ¿Nos apoyas respondiendo las siguientes preguntas?\n\n📌 NOTA IMPORTANTE: Por favor, en tus respuestas sobre experiencia incluye DATOS MEDIBLES Y CUANTIFICABLES (métricas, cifras, porcentajes de logro, volumen de proyectos, número de usuarios/módulos o resultados concretos), ya que nuestro proceso de evaluación valida la experiencia a través de indicadores medibles.\n\nExperiencia\n${expBlock}\n\nDisponibilidad\n${dispBlock}\n\nQuedo atenta a tus respuestas para, en caso de avanzar, coordinar una sesión y platicarte más sobre la vacante. ¡Muchas gracias por tu tiempo!`;
-
-                        const subject = encodeURIComponent(subjectText);
-                        const body = encodeURIComponent(bodyText);
-                        window.location.href = `mailto:${selected.email}?subject=${subject}&body=${body}`;
-                      }}
-                    >
-                      <Mail size={12} /> Redactar en Outlook
-                    </button>
-                  </div>
-                </div>
-
-                <div className="card" style={{ padding: 12, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 6px', color: 'var(--teal)' }}>
-                    Ingresar Respuestas para Double-Check
-                  </h4>
-                  <p style={{ fontSize: 12, color: 'var(--text-low)', margin: '0 0 10px' }}>
-                    Pega el correo de respuesta del candidato aquí para que EAS Engine AI™ evalúe la consistencia.
-                  </p>
-                  
-                  <textarea
-                    rows={4}
-                    style={{ width: '100%', fontSize: 12.5, fontFamily: 'var(--font-mono)', padding: 8, borderRadius: 6, backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#1e293b', resize: 'vertical' }}
-                    placeholder="Pega las respuestas recibidas aquí. Por ejemplo:&#13;1. Mi experiencia técnica incluye 5 años en el área...&#13;4. Disponible inmediatamente&#13;5. Mi último sueldo bruto comprobable fue de $60,000 MXN...&#13;6. CDMX&#13;7. Modalidad Híbrida"
-                    value={doubleCheckAnswersText}
-                    onChange={(e) => setDoubleCheckAnswersText(e.target.value)}
-                  />
-
-                  {answersError && (
-                    <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{answersError}</div>
+                      <hr className="divider" style={{ margin: '14px 0' }} />
+                    </>
                   )}
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ fontSize: 12 }}
-                      disabled={isSubmittingAnswers || !doubleCheckAnswersText.trim()}
-                      onClick={() => handleDoubleCheckSubmit(selected)}
-                    >
-                      {isSubmittingAnswers ? 'Analizando Coherencia...' : 'Ejecutar Cotejo y Double-Check'}
-                    </button>
+                  {/* Cross-Vacancy Recommendation Panel (Talent Pool Optimizer) */}
+                  <div style={{ marginTop: 14, marginBottom: 14 }}>
+                    <h3 style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-low)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Sparkles size={13} style={{ color: 'var(--brass-light)' }} /> Optimización de Ajuste Cruzado (Talent Pool Optimizer)
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {vacancies
+                        .filter(v => v.id !== selected.vacancyId && v.status !== 'Closed')
+                        .map(v => {
+                          const evalRes = calculateStrictFitScore(selected, v);
+                          const score = evalRes.fitScore;
+                          const isMismatch = evalRes.hasDomainMismatch || score <= 34;
+                          const isBetter = !isMismatch && score >= 80 && score > selected.fitScore;
+                          return (
+                            <div
+                              key={v.id}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '8px 10px',
+                                borderRadius: 6,
+                                background: isMismatch ? 'rgba(239,68,68,0.04)' : isBetter ? 'rgba(16,185,129,0.06)' : 'rgba(255,255,255,0.02)',
+                                border: isMismatch ? '1px solid rgba(239,68,68,0.2)' : isBetter ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(255,255,255,0.05)',
+                                fontSize: 12
+                              }}
+                              title={isMismatch ? (evalRes.mismatchReason || 'Incompatibilidad de perfil') : undefined}
+                            >
+                              <div>
+                                <span style={{ fontWeight: 'bold', color: 'var(--text-high)' }}>{v.title}</span>
+                                <span style={{ fontSize: 10, color: 'var(--text-low)', marginLeft: 8 }}>{v.department}</span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                {isMismatch ? (
+                                  <span
+                                    style={{
+                                      fontSize: 9,
+                                      padding: '2px 6px',
+                                      borderRadius: 4,
+                                      backgroundColor: 'rgba(239,68,68,0.15)',
+                                      color: '#f87171',
+                                      fontWeight: 'bold',
+                                      border: '1px solid rgba(239,68,68,0.3)'
+                                    }}
+                                  >
+                                    INCOMPATIBLE
+                                  </span>
+                                ) : isBetter ? (
+                                  <span
+                                    style={{
+                                      fontSize: 9,
+                                      padding: '2px 6px',
+                                      borderRadius: 4,
+                                      backgroundColor: 'var(--success)',
+                                      color: '#000',
+                                      fontWeight: 'bold'
+                                    }}
+                                  >
+                                    MAYOR AJUSTE
+                                  </span>
+                                ) : null}
+                                <span style={{ fontWeight: 'bold', color: isMismatch ? '#f87171' : isBetter ? 'var(--success)' : 'var(--text-low)' }}>
+                                  {score}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      {vacancies.filter(v => v.id !== selected.vacancyId && v.status !== 'Closed').length === 0 && (
+                        <p style={{ fontSize: 11.5, color: 'var(--text-low)', margin: 0, fontStyle: 'italic' }}>
+                          No hay otras vacantes activas para evaluar el ajuste cruzado.
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {selected.doubleCheckReport && (
-                  <div className="card" style={{ padding: 12, borderLeft: '4px solid var(--brass)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div className="bento-grid">
+                    <div className="card bento-cell">
+                      <div className="bento-cell-title" style={{ color: 'var(--success)' }}>
+                        <TrendingUp size={14} /> Fortalezas
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12.5, color: 'var(--text-mid)' }}>
+                        {(selected.strengths || []).map((s, i) => (
+                          <li key={i} style={{ marginBottom: 5 }}>
+                            {s}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="card bento-cell">
+                      <div className="bento-cell-title" style={{ color: 'var(--warning)' }}>
+                        <TrendingDown size={14} /> Áreas de oportunidad
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12.5, color: 'var(--text-mid)' }}>
+                        {(selected.growths || []).map((s, i) => (
+                          <li key={i} style={{ marginBottom: 5 }}>
+                            {s}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Información Importada del CV del Candidato */}
+                  {(() => {
+                    const cvData = extractCvSectionsFromText(selected.resumeText || '');
+                    const fieldHealth = detectDegradedCvFields({
+                      experience: selected.experience,
+                      education: selected.education,
+                      certifications: selected.certifications,
+                      resumeText: selected.resumeText || ''
+                    });
+                    const extractedExp = Array.isArray(cvData?.experience) ? normalizeCanonicalExperience(cvData.experience) : [];
+                    const extractedEdu = Array.isArray(cvData?.education) ? normalizeCanonicalEducation(cvData.education) : [];
+                    const dbExp = Array.isArray(selected.experience) ? normalizeCanonicalExperience(selected.experience) : [];
+                    const dbEdu = Array.isArray(selected.education) ? normalizeCanonicalEducation(selected.education) : [];
+
+                    const expList = (fieldHealth.needsExperienceReextract && extractedExp.length > 0 && !detectDegradedCvFields({ experience: extractedExp, resumeText: selected.resumeText || '' }).needsExperienceReextract)
+                      ? extractedExp
+                      : (dbExp.length > 0 ? dbExp : extractedExp);
+                    const eduList = (fieldHealth.needsEducationReextract && extractedEdu.length > 0)
+                      ? extractedEdu
+                      : (dbEdu.length > 0 ? dbEdu : extractedEdu);
+                    const rawCert = (Array.isArray(selected.certifications) && selected.certifications.length > 0) ? selected.certifications : (Array.isArray(cvData?.certifications) ? cvData.certifications : []);
+                    const certList = normalizeCanonicalCertifications(rawCert);
+
+                    return (
+                      <div className="card" style={{ padding: 14, marginTop: 12, borderRadius: 12, backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxSizing: 'border-box', overflow: 'visible' }}>
+                        <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 10px', color: '#1e1b4b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Briefcase size={15} style={{ color: '#10b981' }} /> Información Extraída del CV (Trayectoria & Formación Completa)
+                        </h4>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, boxSizing: 'border-box' }}>
+                          <div style={{ minWidth: 0, boxSizing: 'border-box' }}>
+                            <h5 style={{ fontSize: 11, fontWeight: 'bold', color: '#334155', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                              💼 Experiencia Laboral (Últimos 3 Empleos)
+                            </h5>
+                            <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', fontSize: 11.5, color: '#475569', lineHeight: 1.45 }}>
+                              {expList.map((item, i) => {
+                                const formatted = formatWorkExperienceItem(item);
+                                return (
+                                  <li key={i} style={{ marginBottom: 8, padding: 10, borderRadius: 8, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', wordBreak: 'break-word', overflowWrap: 'anywhere', boxSizing: 'border-box' }}>
+                                    <div><strong style={{ color: '#0f172a' }}>🏢 Dónde trabajó:</strong> <span style={{ color: '#2563eb', fontWeight: 600 }}>{formatted.company}</span></div>
+                                    <div><strong style={{ color: '#4338ca' }}>💼 Puesto ocupado:</strong> {formatted.position}</div>
+                                    <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>🗓️ <strong>Periodo de tiempo:</strong> {formatted.period}</div>
+                                    {formatted.details && (
+                                      <div style={{ fontSize: 10.5, color: '#334155', marginTop: 4, paddingTop: 4, borderTop: '1px dashed #cbd5e1' }}>
+                                        <strong>⚡ Responsabilidades / Logros Clave:</strong> {formatted.details}
+                                      </div>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                          <div style={{ minWidth: 0, boxSizing: 'border-box' }}>
+                            <h5 style={{ fontSize: 11, fontWeight: 'bold', color: '#334155', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                              🎓 Educación & Grados Académicos (Dónde, Qué y Periodo)
+                            </h5>
+                            <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', fontSize: 11.5, color: '#475569', lineHeight: 1.45, marginBottom: 10 }}>
+                              {eduList.map((item, i) => {
+                                const formatted = formatEducationItem(item);
+                                return (
+                                  <li key={i} style={{ marginBottom: 8, padding: 10, borderRadius: 8, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', wordBreak: 'break-word', overflowWrap: 'anywhere', boxSizing: 'border-box' }}>
+                                    <div><strong style={{ color: '#0f172a' }}>🏛️ Dónde estudió:</strong> <span style={{ color: '#059669', fontWeight: 600 }}>{formatted.institution}</span></div>
+                                    <div><strong style={{ color: '#4338ca' }}>🎓 Qué estudió:</strong> {formatted.degree}</div>
+                                    <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>🗓️ <strong>Periodo de tiempo:</strong> {formatted.period}</div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+
+                            <h5 style={{ fontSize: 11, fontWeight: 'bold', color: '#334155', margin: '10px 0 6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                              📜 Certificaciones & Cursos
+                            </h5>
+                            <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11.5, color: '#475569', lineHeight: 1.45, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                              {certList.map((item, i) => (
+                                <li key={i} style={{ marginBottom: 3 }}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+
+                        {/* Visualizador de Contenido Completo del CV */}
+                        {selected.resumeText && selected.resumeText.length > 30 && (
+                          <details style={{ marginTop: 12, borderTop: '1px border-slate-200', paddingTop: 8 }}>
+                            <summary style={{ cursor: 'pointer', fontSize: 11.5, fontWeight: 'bold', color: '#4F46E5', userSelect: 'none' }}>
+                              📄 Ver Texto Completo Original del CV
+                            </summary>
+                            <div style={{ marginTop: 8, padding: 10, backgroundColor: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 11, color: '#334155', maxHeight: 300, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                              {selected.resumeText}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Retroalimentación Heurística y Calificación Estructurada */}
+                  <div className="card" style={{ padding: 14, marginTop: 12, borderRadius: 12, border: '1px solid #cbd5e1', backgroundColor: '#f8fafc' }}>
+                    <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 6px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Sparkles size={14} style={{ color: '#4f46e5' }} /> Evaluación Heurística & Calificación de Candidato
+                    </h4>
+                    <p style={{ fontSize: 11, color: '#475569', margin: '0 0 10px', lineHeight: 1.4 }}>
+                      Registra una evaluación cualitativa con evidencia técnica u operativa. Cada evaluación favorable ajusta <strong>+8 pts</strong>, una brecha crítica <strong>-10 pts</strong>, y una nota no modifica el puntaje.
+                    </p>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                      <div>
+                        <label style={{ fontSize: 10.5, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 3 }}>
+                          Dictamen de Calificación:
+                        </label>
+                        <select
+                          value={feedbackOutcome}
+                          onChange={(e) => setFeedbackOutcome(e.target.value as any)}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 11.5, backgroundColor: '#ffffff', color: '#0f172a' }}
+                        >
+                          <option value="Hired">Favorable / Validación Exitosa (+8 pts)</option>
+                          <option value="Rejected">Desfavorable / Brecha Crítica (-10 pts)</option>
+                          <option value="Note">Nota Informativa / Seguimiento (0 pts)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: 10.5, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 3 }}>
+                          Dimensión Evaluada:
+                        </label>
+                        <select
+                          value={feedbackDimension}
+                          onChange={(e) => setFeedbackDimension(e.target.value)}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 11.5, backgroundColor: '#ffffff', color: '#0f172a' }}
+                        >
+                          <option value="Evaluación Técnica de Perfil">Evaluación Técnica de Perfil</option>
+                          <option value="Entrevista por Competencias RH">Entrevista por Competencias RH</option>
+                          <option value="Validación de Experiencia y Proyectos">Validación de Experiencia y Proyectos</option>
+                          <option value="Alineación Salarial y Disponibilidad">Alineación Salarial y Disponibilidad</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <textarea
+                      rows={3}
+                      placeholder="Escribe la justificación y evidencia observable de la entrevista o evaluación técnica (mínimo 10 caracteres)..."
+                      value={commentsText}
+                      onChange={(e) => setCommentsText(e.target.value)}
+                      style={{
+                        width: '100%',
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 8,
+                        padding: 8,
+                        fontSize: 11.5,
+                        color: '#0f172a',
+                        outline: 'none',
+                        resize: 'none',
+                        boxSizing: 'border-box',
+                        marginBottom: 8
+                      }}
+                    />
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 10.5, color: commentsText.trim().length >= 10 ? '#059669' : '#dc2626' }}>
+                        {commentsText.trim().length >= 10 ? 'Evidencia suficiente para calificación' : `Mínimo 10 caracteres (${commentsText.trim().length}/10)`}
+                      </span>
+                      <button
+                        onClick={handleSaveComments}
+                        disabled={savingComments || commentsText.trim().length < 10}
+                        className="btn btn-primary"
+                        style={{ padding: '6px 14px', fontSize: 11.5, fontWeight: 600 }}
+                      >
+                        {savingComments ? 'Guardando...' : 'Aplicar Evaluación y Actualizar Score'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Historial de Cambios en Kanban */}
+                  <div className="card" style={{ padding: 12, marginTop: 12, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12 }}>
+                    <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 6px', color: '#103268' }}>
+                      Historial de Cambios (Auditoría Kanban)
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {(selected.history || []).map((h, i) => (
+                        <div key={i} style={{ fontSize: 11, color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: 4 }}>
+                          <span style={{ fontWeight: 'bold' }}>{new Date(h.timestamp).toLocaleString()}</span> — Cambió a <span className="px-1.5 py-0.5 rounded bg-slate-100 font-bold">{h.stage}</span> por <span style={{ fontStyle: 'italic' }}>{h.user}</span>
+                        </div>
+                      ))}
+                      {(!selected.history || selected.history.length === 0) && (
+                        <p style={{ fontSize: 11, color: 'var(--text-low)', margin: 0 }}>No hay cambios registrados en esta postulación.</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {detailsTab === 'doubleCheck' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div className="card" style={{ padding: 12, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 6px' }}>
                       <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: 0, color: 'var(--brass)' }}>
-                        Dictamen del Double-Check
+                        Cuestionario de Doble Validación (7 Preguntas)
                       </h4>
+                      {(selected.vacancyId || selectedVacancy?.id) && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          disabled={isRegeneratingQuestions}
+                          style={{ fontSize: 11, padding: '2px 8px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: 4, height: 'auto', border: '1px solid #cbd5e1', borderRadius: 4 }}
+                          onClick={async () => {
+                            try {
+                              const targetVacId = selected.vacancyId || selectedVacancy?.id;
+                              if (!targetVacId) {
+                                alert("Por favor asigna primero una vacante al candidato.");
+                                return;
+                              }
+                              setIsRegeneratingQuestions(true);
+                              const customKey = localStorage.getItem('eas_gemini_key') || '';
+                              const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                              if (customKey) headers['x-gemini-api-key'] = customKey;
+
+                              // Solo regenera las 3 preguntas de experiencia (nuevas y distintas a las actuales);
+                              // ya no re-evalúa el Fit Score del candidato.
+                              const res = await authFetch(`/api/candidates/${selected.id}/regenerate-questions`, {
+                                method: 'POST',
+                                headers
+                              });
+                              const resData = await res.json().catch(() => ({}));
+                              if (!res.ok) {
+                                throw new Error(resData.error || `Respuesta del servidor no válida (${res.status})`);
+                              }
+                              if (resData && resData.candidate) {
+                                onCandidateUpdated({ ...selected, ...resData.candidate });
+                              } else {
+                                throw new Error("No se devolvió información actualizada del candidato.");
+                              }
+                            } catch (err: any) {
+                              alert("Error al regenerar preguntas de la vacante: " + (err.message || String(err)));
+                            } finally {
+                              setIsRegeneratingQuestions(false);
+                            }
+                          }}
+                        >
+                          {isRegeneratingQuestions ? '⏳ Regenerando...' : '🔄 Regenerar'}
+                        </button>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 12, color: 'var(--text-low)', margin: '0 0 10px' }}>
+                      Envía estas preguntas al candidato por correo electrónico para confrontar sus habilidades frente al CV.
+                    </p>
+
+                    <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, padding: 10, backgroundColor: '#f1f5f9', color: '#1e293b', marginBottom: 12 }}>
+                      <div style={{ fontWeight: 'bold', fontSize: 11, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, borderBottom: '1px solid #cbd5e1', paddingBottom: 2 }}>
+                        Experiencia (Preguntas Personalizadas Vacante-CV)
+                      </div>
+                      {(() => {
+                        const expQs = experienceQuestionsFor(selected, selectedVacancy);
+                        return expQs.map((qText, idx) => {
+                          const existingAns = answerFor(selected, qText);
+                          return (
+                            <div key={idx} style={{ fontSize: 12, marginBottom: 8, borderBottom: '1px solid #e2e8f0', paddingBottom: 6, color: '#334155' }}>
+                              <strong>Pregunta {idx + 1}:</strong> {qText}
+                              {existingAns && <div style={{ color: 'var(--success)', marginTop: 4, fontStyle: 'italic' }}>Resp: {existingAns}</div>}
+                              {!existingAns && selected.doubleCheckReport && <div style={{ color: 'var(--danger)', marginTop: 4, fontStyle: 'italic' }}>Sin respuesta</div>}
+                            </div>
+                          );
+                        });
+                      })()}
+
+                      <div style={{ fontWeight: 'bold', fontSize: 11, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 10, marginBottom: 6, borderBottom: '1px solid #cbd5e1', paddingBottom: 2 }}>
+                        Disponibilidad (4 Preguntas Fijas)
+                      </div>
+                      {FIXED_AVAILABILITY_QUESTIONS.map((fixedQ, idx) => {
+                        // Antes se leía la posición idx+3, que con el cuestionario de 4+4 del servidor
+                        // mostraba la 4ª pregunta de experiencia en lugar de la de disponibilidad.
+                        const qText = fixedQ;
+                        const ansText = answerFor(selected, fixedQ);
+                        return (
+                          <div key={idx + 4} style={{ fontSize: 12, marginBottom: 8, borderBottom: '1px solid #e2e8f0', paddingBottom: 6, color: '#334155' }}>
+                            <strong>Pregunta {idx + 4}:</strong> {qText}
+                            {ansText && <div style={{ color: 'var(--success)', marginTop: 4, fontStyle: 'italic' }}>Resp: {ansText}</div>}
+                            {!ansText && selected.doubleCheckReport && <div style={{ color: 'var(--danger)', marginTop: 4, fontStyle: 'italic' }}>Sin respuesta</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8 }}>
                       <button
                         type="button"
                         className="btn btn-secondary"
-                        style={{ fontSize: 11, padding: '2px 8px' }}
+                        style={{ fontSize: 11.5, flex: 1 }}
                         onClick={async () => {
-                          const initialBase = selected.initialFitScore || 82;
-                          const updatedCandidate: Candidate = {
-                            ...selected,
-                            fitScore: initialBase,
-                            doubleCheckReport: ''
-                          };
-                          const saved = await persistCandidateChange(selected, {
-                            fitScore: initialBase,
-                            doubleCheckReport: ''
-                          }, updatedCandidate);
-                          if (!saved) return;
-                          setDoubleCheckAnswersText('');
-                          alert(`¡Se ha limpiado la evaluación de Double-Check de ${selected.name}! El score ha sido restablecido a ${initialBase}%.`);
+                          const recruiterName = localStorage.getItem('eas_user_name') || userEmail.split('@')[0] || 'Atracción de Talento';
+                          const vacTitle = selectedVacancy?.title || selected.role || 'Nombre de la vacante';
+                          const source = selected.channel && selected.channel !== 'Otros' ? selected.channel : 'tu postulación';
+                          const expList = experienceQuestionsFor(selected, selectedVacancy);
+                          const expBlock = expList.map((q, i) => `${i + 1}. ${q}`).join('\n');
+
+                          const dispBlock = [
+                            "4. ¿Cuál es tu disponibilidad para integrarte a la vacante?",
+                            "5. ¿Cuál fue tu último sueldo mensual bruto (comprobable)?",
+                            "6. ¿Dónde te ubicas actualmente?",
+                            "7. ¿En qué modalidad de trabajo podrías colaborar (presencial, híbrido o remoto)?"
+                          ].join('\n');
+
+                          const cleanName = cleanCandidateName(selected.name, selected.resumeText, selected.email);
+                          const text = `¡Buen día ${cleanName}!\n\nEspero que te encuentres muy bien. Mi nombre es ${recruiterName}, te contacto del equipo de Atracción de Talento de EAS Consulting.\n\nSomos una empresa con más de 19 años de experiencia en implementación, consultoría y soporte de aplicaciones SAP. Actualmente buscamos reforzar nuestro equipo con un ${vacTitle}.\n\nRecibimos tu CV a través de ${source} y nos gustaría conocer un poco más sobre tu experiencia. ¿Nos apoyas respondiendo las siguientes preguntas?\n\n📌 NOTA IMPORTANTE: Por favor, en tus respuestas sobre experiencia incluye DATOS MEDIBLES Y CUANTIFICABLES (métricas, cifras, porcentajes de logro, volumen de proyectos, número de usuarios/módulos o resultados concretos), ya que nuestro proceso de evaluación valida la experiencia a través de indicadores medibles.\n\nExperiencia\n${expBlock}\n\nDisponibilidad\n${dispBlock}\n\nQuedo atenta a tus respuestas para, en caso de avanzar, coordinar una sesión y platicarte más sobre la vacante. ¡Muchas gracias por tu tiempo!`;
+                          const ok = await copyToClipboard(text);
+                          if (ok) {
+                            alert('¡Plantilla de correo copiada al portapapeles!');
+                          } else {
+                            alert('No se pudo copiar automáticamente. Por favor copia el texto manualmente.');
+                          }
                         }}
                       >
-                        🗑️ Limpiar Evaluación
+                        <Copy size={12} /> Copiar Plantilla
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: 11.5, flex: 1 }}
+                        onClick={() => {
+                          const recruiterName = localStorage.getItem('eas_user_name') || userEmail.split('@')[0] || 'Atracción de Talento';
+                          const vacTitle = selectedVacancy?.title || selected.role || 'Nombre de la vacante';
+                          const source = selected.channel && selected.channel !== 'Otros' ? selected.channel : 'tu postulación';
+                          const expList = experienceQuestionsFor(selected, selectedVacancy);
+                          const expBlock = expList.map((q, i) => `${i + 1}. ${q}`).join('\n');
+
+                          const dispBlock = [
+                            "4. ¿Cuál es tu disponibilidad para integrarte a la vacante?",
+                            "5. ¿Cuál fue tu último sueldo mensual bruto (comprobable)?",
+                            "6. ¿Dónde te ubicas actualmente?",
+                            "7. ¿En qué modalidad de trabajo podrías colaborar (presencial, híbrido o remoto)?"
+                          ].join('\n');
+
+                          const cleanName = cleanCandidateName(selected.name, selected.resumeText, selected.email);
+                          const subjectText = `Vacante EAS | ${vacTitle}`;
+                          const bodyText = `¡Buen día ${cleanName}!\n\nEspero que te encuentres muy bien. Mi nombre es ${recruiterName}, te contacto del equipo de Atracción de Talento de EAS Consulting.\n\nSomos una empresa con más de 19 años de experiencia en implementación, consultoría y soporte de aplicaciones SAP. Actualmente buscamos reforzar nuestro equipo con un ${vacTitle}.\n\nRecibimos tu CV a través de ${source} y nos gustaría conocer un poco más sobre tu experiencia. ¿Nos apoyas respondiendo las siguientes preguntas?\n\n📌 NOTA IMPORTANTE: Por favor, en tus respuestas sobre experiencia incluye DATOS MEDIBLES Y CUANTIFICABLES (métricas, cifras, porcentajes de logro, volumen de proyectos, número de usuarios/módulos o resultados concretos), ya que nuestro proceso de evaluación valida la experiencia a través de indicadores medibles.\n\nExperiencia\n${expBlock}\n\nDisponibilidad\n${dispBlock}\n\nQuedo atenta a tus respuestas para, en caso de avanzar, coordinar una sesión y platicarte más sobre la vacante. ¡Muchas gracias por tu tiempo!`;
+
+                          const subject = encodeURIComponent(subjectText);
+                          const body = encodeURIComponent(bodyText);
+                          window.location.href = `mailto:${selected.email}?subject=${subject}&body=${body}`;
+                        }}
+                      >
+                        <Mail size={12} /> Redactar en Outlook
                       </button>
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-mid)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
-                      {selected.doubleCheckReport}
+                  </div>
+
+                  <div className="card" style={{ padding: 12, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12 }}>
+                    <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 6px', color: 'var(--teal)' }}>
+                      Ingresar Respuestas para Double-Check
+                    </h4>
+                    <p style={{ fontSize: 12, color: 'var(--text-low)', margin: '0 0 10px' }}>
+                      Pega el correo de respuesta del candidato aquí para que EAS Engine AI™ evalúe la consistencia.
+                    </p>
+
+                    <textarea
+                      rows={4}
+                      style={{ width: '100%', fontSize: 12.5, fontFamily: 'var(--font-mono)', padding: 8, borderRadius: 6, backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#1e293b', resize: 'vertical' }}
+                      placeholder="Pega las respuestas recibidas aquí. Por ejemplo:&#13;1. Mi experiencia técnica incluye 5 años en el área...&#13;4. Disponible inmediatamente&#13;5. Mi último sueldo bruto comprobable fue de $60,000 MXN...&#13;6. CDMX&#13;7. Modalidad Híbrida"
+                      value={doubleCheckAnswersText}
+                      onChange={(e) => setDoubleCheckAnswersText(e.target.value)}
+                    />
+
+                    {answersError && (
+                      <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{answersError}</div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: 12 }}
+                        disabled={isSubmittingAnswers || !doubleCheckAnswersText.trim()}
+                        onClick={() => handleDoubleCheckSubmit(selected)}
+                      >
+                        {isSubmittingAnswers ? 'Analizando Coherencia...' : 'Ejecutar Cotejo y Double-Check'}
+                      </button>
                     </div>
                   </div>
-                )}
-              </div>
-            )}
 
-            {detailsTab === 'speech' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div className="card" style={{ padding: 14, maxHeight: 380, overflowY: 'auto' }}>
-                  <div style={{ fontSize: 12.5, color: 'var(--text-mid)', whiteSpace: 'pre-line', lineHeight: 1.6 }}>
-                    {selected.interviewSpeech ? (
-                      selected.interviewSpeech
-                    ) : (
-                      <>
-                        <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 8px', color: 'var(--brass-light)' }}>
-                          📢 Pauta y Speech de Entrevista (EAS Engine AI™)
+                  {selected.doubleCheckReport && (
+                    <div className="card" style={{ padding: 12, borderLeft: '4px solid var(--brass)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: 0, color: 'var(--brass)' }}>
+                          Dictamen del Double-Check
                         </h4>
-                        
-                        <div style={{ marginBottom: 12, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 10 }}>
-                          <strong style={{ color: 'var(--teal)', fontSize: 12, display: 'block', marginBottom: 4 }}>
-                            👥 Para Capital Humano (RH):
-                          </strong>
-                          <p style={{ margin: 0, fontSize: 11.5, color: 'var(--text-high)', fontStyle: 'italic' }}>
-                            {`Hola ${cleanCandidateName(selected.name, selected.resumeText, selected.email)}, bienvenido(a) a EAS Consulting. Gracias por participar en nuestro proceso para la vacante de ${selectedVacancy?.title || 'nuestra vacante'}. Queremos aprovechar este espacio para conocer más sobre tu trayectoria profesional, al igual que evaluar tus competencias de comunicación, liderazgo y trabajo en equipo. ¿Podríamos iniciar platicando sobre tu último proyecto...?`}
-                          </p>
-                        </div>
-                        
-                        <div>
-                          <strong style={{ color: 'var(--brass)', fontSize: 12, display: 'block', marginBottom: 4 }}>
-                            💼 Para el Líder Técnico / Hiring Manager:
-                          </strong>
-                          <p style={{ margin: 0, fontSize: 11.5, color: 'var(--text-high)', fontStyle: 'italic' }}>
-                            {`Bienvenido ${cleanCandidateName(selected.name, selected.resumeText, selected.email)}. En esta sesión nos enfocaremos en comprender tu experiencia técnica resolviendo desafíos reales del puesto. Específicamente, nos gustaría conocer cómo manejas ${(selected.strengths && selected.strengths[0]) || 'los proyectos técnicos bajo presión'} y tu experiencia con las tecnologías requeridas. Cuéntanos sobre una situación técnica compleja...`}
-                          </p>
-                        </div>
-                      </>
-                    )}
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          onClick={async () => {
+                            const initialBase = selected.initialFitScore || 82;
+                            const updatedCandidate: Candidate = {
+                              ...selected,
+                              fitScore: initialBase,
+                              doubleCheckReport: ''
+                            };
+                            const saved = await persistCandidateChange(selected, {
+                              fitScore: initialBase,
+                              doubleCheckReport: ''
+                            }, updatedCandidate);
+                            if (!saved) return;
+                            setDoubleCheckAnswersText('');
+                            alert(`¡Se ha limpiado la evaluación de Double-Check de ${selected.name}! El score ha sido restablecido a ${initialBase}%.`);
+                          }}
+                        >
+                          🗑️ Limpiar Evaluación
+                        </button>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-mid)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                        {selected.doubleCheckReport}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {detailsTab === 'speech' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div className="card" style={{ padding: 14, maxHeight: 380, overflowY: 'auto' }}>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-mid)', whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+                      {selected.interviewSpeech ? (
+                        selected.interviewSpeech
+                      ) : (
+                        <>
+                          <h4 style={{ fontSize: 13, fontWeight: 'bold', margin: '0 0 8px', color: 'var(--brass-light)' }}>
+                            📢 Pauta y Speech de Entrevista (EAS Engine AI™)
+                          </h4>
+
+                          <div style={{ marginBottom: 12, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 10 }}>
+                            <strong style={{ color: 'var(--teal)', fontSize: 12, display: 'block', marginBottom: 4 }}>
+                              👥 Para Capital Humano (RH):
+                            </strong>
+                            <p style={{ margin: 0, fontSize: 11.5, color: 'var(--text-high)', fontStyle: 'italic' }}>
+                              {`Hola ${cleanCandidateName(selected.name, selected.resumeText, selected.email)}, bienvenido(a) a EAS Consulting. Gracias por participar en nuestro proceso para la vacante de ${selectedVacancy?.title || 'nuestra vacante'}. Queremos aprovechar este espacio para conocer más sobre tu trayectoria profesional, al igual que evaluar tus competencias de comunicación, liderazgo y trabajo en equipo. ¿Podríamos iniciar platicando sobre tu último proyecto...?`}
+                            </p>
+                          </div>
+
+                          <div>
+                            <strong style={{ color: 'var(--brass)', fontSize: 12, display: 'block', marginBottom: 4 }}>
+                              💼 Para el Líder Técnico / Hiring Manager:
+                            </strong>
+                            <p style={{ margin: 0, fontSize: 11.5, color: 'var(--text-high)', fontStyle: 'italic' }}>
+                              {`Bienvenido ${cleanCandidateName(selected.name, selected.resumeText, selected.email)}. En esta sesión nos enfocaremos en comprender tu experiencia técnica resolviendo desafíos reales del puesto. Específicamente, nos gustaría conocer cómo manejas ${(selected.strengths && selected.strengths[0]) || 'los proyectos técnicos bajo presión'} y tu experiencia con las tecnologías requeridas. Cuéntanos sobre una situación técnica compleja...`}
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 20, flexWrap: 'wrap', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 14, flexShrink: 0 }}>
@@ -3624,7 +3786,7 @@ function AnalyzeCandidateForm({ vacancies, initialBulkMode, defaultVacancyId, on
         reader.onerror = () => resolve('');
         reader.readAsText(file);
       });
-    } catch (_) {}
+    } catch (_) { }
 
     const cleanNameFromFile = file.name.replace(/\.[^/.]+$/, '').replace(/^[TM_\-\s]+/, '').replace(/_/g, ' ').trim();
     const name = cleanNameFromFile || 'Candidato Postulado';
@@ -3651,7 +3813,7 @@ function AnalyzeCandidateForm({ vacancies, initialBulkMode, defaultVacancyId, on
     }
 
     if (parsedExp.length === 0) parsedExp.push(`Consultor / Especialista | Empresa / Proyecto | 2022 - 2026`);
-    if (parsedEdu.length === 0) parsedEdu.push(`Licenciatura / Ingeniería | Universidad Nacional Autónoma de México | 2017 - 2021`);
+    if (parsedEdu.length === 0) parsedEdu.push(`Formación Profesional / Superior | Institución Educativa (por validar en entrevista) | Periodo de estudios`);
     if (parsedCert.length === 0) parsedCert.push(`Certificación Profesional | EAS Institute | 2024`);
 
     const summary = `Perfil profesional de ${name} procesado para evaluación en EAS Consulting. Archivo: ${file.name}.`;
@@ -3671,7 +3833,7 @@ function AnalyzeCandidateForm({ vacancies, initialBulkMode, defaultVacancyId, on
 
   const handleFileSelect = async (files: FileList) => {
     if (files.length === 0) return;
-    
+
     if (files.length > 1 || isBulkMode) {
       setIsBulkMode(true);
       setLoading(true);
@@ -3767,7 +3929,7 @@ function AnalyzeCandidateForm({ vacancies, initialBulkMode, defaultVacancyId, on
 
         const fitVal = strictLocal.fitScore;
         const newCandidate: Candidate = {
-          id: `cand-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          id: `cand-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           name: cleanCandidateName(parsedInfo.name || file.name.replace(/\.[^/.]+$/, "")),
           email: parsedInfo.email || "candidato@eas-consulting.com",
           phone: parsedInfo.phone || "5500000000",
