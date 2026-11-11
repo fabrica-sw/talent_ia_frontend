@@ -18,7 +18,7 @@ import {
   calculateCandidateCompetencies,
   isStaticLegacyCompetencies
 } from '../utils/vacancyUtils';
-import { generateExperienceQuestions, FIXED_AVAILABILITY_QUESTIONS } from '../utils/questionEngine';
+import { generateExperienceQuestions, FIXED_AVAILABILITY_QUESTIONS, isQuestionRelevant } from '../utils/questionEngine';
 import { recordAuditLog } from '../utils/auditLogger';
 import { copyToClipboard } from '../utils/clipboardUtils';
 import {
@@ -1271,23 +1271,31 @@ export default function CandidatePanel({
   };
 
   useEffect(() => {
-    if (selected) {
-      setCommentsText(selected.comments || "");
-    } else {
-      setCommentsText("");
-    }
-  }, [selectedId, candidates]);
+    setCommentsText("");
+  }, [selectedId]);
 
   // Las 3 preguntas de experiencia del candidato: las guardadas en BD o, si no hay, las del motor
   // (semilla = id del candidato, así se ven igual en cada apertura hasta que se regeneren).
   const experienceQuestionsFor = (cand: Candidate, vac?: Vacancy): string[] => {
-    const stored = (cand.screeningQuestions || [])
+    const qVac = { title: vac?.title || cand.role, department: vac?.department, requirements: vac?.requirements || [] };
+    const storedAll = cand.screeningQuestions || [];
+    const hasAnswers = storedAll.some(q => q?.answer && String(q.answer).trim().length > 0);
+    const stored = storedAll
       .map(q => q?.question)
       .filter((q): q is string => !!q && !FIXED_AVAILABILITY_QUESTIONS.includes(q));
-    if (stored.length >= 3) return stored.slice(0, 3);
+    if (stored.length >= 3 && (hasAnswers || !vac || stored.every(q => isQuestionRelevant(q, qVac)))) {
+      return stored.slice(0, 3);
+    }
     return generateExperienceQuestions(
-      { title: vac?.title || cand.role, department: vac?.department, requirements: vac?.requirements || [] },
-      { name: cand.name, resumeText: cand.resumeText, summary: cand.summary, experience: cand.experience || [] },
+      qVac,
+      {
+        name: cand.name,
+        resumeText: cand.resumeText,
+        summary: cand.summary,
+        experience: cand.experience || [],
+        education: cand.education || [],
+        certifications: cand.certifications || []
+      },
       { seed: cand.id }
     );
   };
@@ -1324,24 +1332,16 @@ export default function CandidatePanel({
     }
     setSavingComments(true);
     try {
-      if (feedbackOutcome === 'Note') {
-        const formattedNote = `[Nota Informativa | ${feedbackDimension} - ${new Date().toLocaleDateString('es-MX')}]: ${cleanComments}`;
-        const updatedNotes = selected.comments ? `${selected.comments}\n${formattedNote}` : formattedNote;
-        const res = await persistCandidateChange(selected, { comments: updatedNotes }, { ...selected, comments: updatedNotes });
-        if (res) {
-          setCommentsText('');
-          alert('Nota informativa registrada exitosamente sin modificar el score.');
-        }
-        return;
-      }
-
+      const explicitDelta = feedbackOutcome === 'Hired' ? 8 : feedbackOutcome === 'Rejected' ? -10 : 0;
       const fbRes = await api.submitFeedback(
         selected.id,
         feedbackOutcome,
         cleanComments,
         cleanComments,
         undefined,
-        feedbackDimension
+        feedbackDimension,
+        explicitDelta,
+        false
       ).catch((e) => {
         console.warn("Error enviando feedback:", e);
         return null;
@@ -1352,10 +1352,29 @@ export default function CandidatePanel({
         setCommentsText('');
         const delta = (fbRes.boostApplied !== undefined) ? fbRes.boostApplied : (fbRes.newScore ? fbRes.newScore - selected.fitScore : 0);
         const deltaStr = delta > 0 ? `+${delta}` : `${delta}`;
-        alert(`Evaluación heurística guardada exitosamente.\n\n• Dimensión: ${feedbackDimension}\n• Dictamen: ${feedbackOutcome === 'Hired' ? 'Favorable (+8 pts)' : 'Desfavorable (-10 pts)'}\n• Score de apego actualizado: ${fbRes.newScore ?? fbRes.candidate.fitScore}% (${deltaStr} pts).`);
+        if (feedbackOutcome === 'Note') {
+          alert('Nota informativa registrada exitosamente sin modificar el score.');
+        } else {
+          alert(`Evaluación heurística guardada exitosamente.\n\n• Dimensión: ${feedbackDimension}\n• Dictamen: ${feedbackOutcome === 'Hired' ? 'Favorable (+8 pts)' : 'Brecha Crítica (-10 pts)'}\n• Score actualizado: ${fbRes.newScore ?? fbRes.candidate.fitScore}% (${deltaStr} pts).`);
+        }
       } else {
         alert('No se pudo sincronizar la evaluación con el servidor. Revisa tu conexión.');
       }
+    } finally {
+      setSavingComments(false);
+    }
+  };
+
+  const handleRevertEvaluationNote = async (noteId: string) => {
+    if (!selected) return;
+    setSavingComments(true);
+    try {
+      const res = await api.revertEvaluationNote(selected.id, noteId);
+      if (res?.candidate) {
+        onCandidateUpdated(res.candidate);
+      }
+    } catch (err: any) {
+      alert(`No se pudo revertir el ajuste: ${err?.message || err}`);
     } finally {
       setSavingComments(false);
     }
@@ -1383,10 +1402,15 @@ export default function CandidatePanel({
         comments: candidate.comments || ''
       });
 
-      const baseScore = typeof candidate.initialFitScore === 'number' ? candidate.initialFitScore : candidate.fitScore;
-      const patch = {
+      const baseScore = typeof body.cvBaseScore === 'number'
+        ? body.cvBaseScore
+        : (typeof candidate.cvBaseScore === 'number' ? candidate.cvBaseScore : (typeof candidate.initialFitScore === 'number' ? candidate.initialFitScore : candidate.fitScore));
+      const patch: Partial<Candidate> = {
         fitScore: body.fitScore,
         initialFitScore: baseScore,
+        cvBaseScore: baseScore,
+        doubleCheckDelta: typeof body.doubleCheckDelta === 'number' ? body.doubleCheckDelta : (body.fitScore - baseScore),
+        fitScoreBreakdown: body.fitScoreBreakdown,
         doubleCheckReport: body.doubleCheckReport,
         growths: body.growths,
         interviewSpeech: body.interviewSpeech,
@@ -1811,7 +1835,7 @@ export default function CandidatePanel({
         return;
       }
 
-      const fbRes = await api.submitFeedback(candidate.id, outcome, userComments).catch((e) => {
+      const fbRes = await api.submitFeedback(candidate.id, outcome, userComments, userComments, undefined, 'Dictamen Final', outcome === 'Hired' ? 8 : -10, true).catch((e) => {
         console.warn("Feedback de aprendizaje no registrado:", e);
         return null;
       });
@@ -2616,7 +2640,7 @@ export default function CandidatePanel({
                         const resData = await updateRes.json().catch(() => ({}));
                         if (!updateRes.ok) throw new Error(resData.message || resData.error || `HTTP ${updateRes.status}`);
                         if (resData.candidate) {
-                          onCandidateUpdated({ ...selected, ...resData.candidate, fitScore: strictEval.fitScore, initialFitScore: strictEval.initialFitScore });
+                          onCandidateUpdated({ ...selected, ...resData.candidate });
                         }
                       } catch (err: any) {
                         onCandidateUpdated(selected);
@@ -2784,12 +2808,62 @@ export default function CandidatePanel({
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                    <FitGauge value={selected.fitScore} initialValue={selected.initialFitScore} size={64} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+                    <FitGauge value={selected.fitScore} initialValue={selected.cvBaseScore ?? selected.initialFitScore} size={64} />
                     <div>
                       <p style={{ fontSize: 13, color: 'var(--text-mid)', margin: 0, lineHeight: 1.6 }}>{cleanEnginePrefix(selected.summary)}</p>
                     </div>
                   </div>
+
+                  {/* Trazabilidad y Desglose del Score (Pilar 5) */}
+                  {(() => {
+                    const liveStrict = selectedVacancy ? calculateStrictFitScore(selected, selectedVacancy) : undefined;
+                    const bd = selected.fitScoreBreakdown || liveStrict?.breakdown;
+                    const cvBase = selected.cvBaseScore ?? bd?.cvBaseScore ?? selected.initialFitScore ?? selected.fitScore;
+                    const dcDelta = selected.doubleCheckDelta ?? bd?.doubleCheckDelta ?? 0;
+                    const fbDelta = selected.manualFeedbackDelta ?? bd?.manualFeedbackDelta ?? 0;
+                    const matched = bd?.matchedRequirements || liveStrict?.breakdown?.matchedRequirements || [];
+                    const missing = bd?.missingRequirements || liveStrict?.breakdown?.missingRequirements || [];
+                    return (
+                      <div className="card" style={{ padding: 12, marginBottom: 14, borderRadius: 10, backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#1e293b', marginBottom: 8 }}>
+                          Trazabilidad y Desglose del Score ({selected.fitScore}%)
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8, marginBottom: (matched.length || missing.length) ? 10 : 0 }}>
+                          <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>Base CV vs Vacante</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{cvBase}%</div>
+                          </div>
+                          <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>Ajuste Double-Check</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: dcDelta > 0 ? '#059669' : dcDelta < 0 ? '#dc2626' : '#475569' }}>
+                              {dcDelta > 0 ? `+${dcDelta}` : dcDelta} pts
+                            </div>
+                          </div>
+                          <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>Comentarios Evaluador</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: fbDelta > 0 ? '#059669' : fbDelta < 0 ? '#dc2626' : '#475569' }}>
+                              {fbDelta > 0 ? `+${fbDelta}` : fbDelta} pts
+                            </div>
+                          </div>
+                        </div>
+                        {(matched.length > 0 || missing.length > 0) && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {matched.slice(0, 5).map((m, idx) => (
+                              <span key={`m-${idx}`} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 999, backgroundColor: '#dcfce7', color: '#166534', border: '1px solid #86efac' }}>
+                                Cubierto ({m.source === 'experience' ? 'Exp' : m.source === 'certifications' ? 'Cert' : m.source === 'education' ? 'Edu' : 'CV'}): {m.req}
+                              </span>
+                            ))}
+                            {missing.slice(0, 4).map((req, idx) => (
+                              <span key={`g-${idx}`} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 999, backgroundColor: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}>
+                                Brecha: {req}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div className="tag-list" style={{ marginBottom: 18 }}>
                     <span className="badge badge-neutral">Inglés {selected.englishLevel}</span>
@@ -3344,6 +3418,62 @@ export default function CandidatePanel({
                         {savingComments ? 'Guardando...' : 'Aplicar Evaluación y Actualizar Score'}
                       </button>
                     </div>
+
+                    {Array.isArray(selected.evaluationNotes) && selected.evaluationNotes.length > 0 && (
+                      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #cbd5e1' }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
+                          Historial Estructurado de Notas y Ajustes ({selected.evaluationNotes.length})
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {selected.evaluationNotes.map((note) => (
+                            <div
+                              key={note.id}
+                              style={{
+                                padding: '6px 8px',
+                                borderRadius: 8,
+                                backgroundColor: note.reverted ? '#f1f5f9' : '#ffffff',
+                                border: '1px solid #e2e8f0',
+                                opacity: note.reverted ? 0.65 : 1,
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'flex-start',
+                                gap: 8
+                              }}
+                            >
+                              <div style={{ fontSize: 11, color: '#0f172a', lineHeight: 1.4 }}>
+                                <span style={{ fontWeight: 700 }}>{note.dimension}</span>{' '}
+                                <span style={{ color: note.delta > 0 ? '#059669' : note.delta < 0 ? '#dc2626' : '#64748b', fontWeight: 700 }}>
+                                  ({note.delta > 0 ? `+${note.delta}` : note.delta} pts{note.reverted ? ' - Revertido' : ''})
+                                </span>
+                                <div style={{ color: '#475569', textDecoration: note.reverted ? 'line-through' : 'none' }}>{note.comment}</div>
+                                <div style={{ fontSize: 9.5, color: '#94a3b8' }}>
+                                  {note.author} - {new Date(note.timestamp).toLocaleDateString('es-MX')}
+                                </div>
+                              </div>
+                              {note.delta !== 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRevertEvaluationNote(note.id)}
+                                  disabled={savingComments}
+                                  style={{
+                                    padding: '2px 7px',
+                                    fontSize: 10,
+                                    borderRadius: 6,
+                                    border: '1px solid #cbd5e1',
+                                    backgroundColor: '#f8fafc',
+                                    color: '#334155',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  {note.reverted ? 'Restaurar' : 'Revertir'}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Historial de Cambios en Kanban */}

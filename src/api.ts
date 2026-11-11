@@ -100,6 +100,10 @@ export const api = {
       quality: number;
       fitScore: number;
       baseScore: number;
+      cvBaseScore?: number;
+      doubleCheckDelta?: number;
+      manualFeedbackDelta?: number;
+      fitScoreBreakdown?: any;
       competencies: Record<string, number>;
       summary: string;
       strengths: string[];
@@ -125,10 +129,23 @@ export const api = {
     }),
 
   getWeights: () => request<WeightsState>('/ai-weights'),
-  submitFeedback: (candidateId: string, outcome?: string, feedbackComments?: string, comments?: string, competencies?: any, dimension?: string) =>
-    request<{ success: boolean; candidate?: Candidate; newScore?: number; boostApplied?: number; message?: string }>('/submit-feedback', {
+  submitFeedback: (
+    candidateId: string,
+    outcome?: string,
+    feedbackComments?: string,
+    comments?: string,
+    competencies?: any,
+    dimension?: string,
+    scoreAdjustment?: number,
+    updateStage = false
+  ) =>
+    request<{ success: boolean; candidate?: Candidate; newScore?: number; boostApplied?: number; manualFeedbackDelta?: number; message?: string }>('/submit-feedback', {
       method: 'POST',
-      body: JSON.stringify({ candidateId, outcome, feedbackComments: feedbackComments || comments, comments: comments || feedbackComments, competencies, dimension })
+      body: JSON.stringify({ candidateId, outcome, feedbackComments: feedbackComments || comments, comments: comments || feedbackComments, competencies, dimension, scoreAdjustment, updateStage })
+    }),
+  revertEvaluationNote: (candidateId: string, noteId: string) =>
+    request<{ success: boolean; candidate?: Candidate; newScore?: number; manualFeedbackDelta?: number }>(`/candidates/${candidateId}/notes/${encodeURIComponent(noteId)}/revert`, {
+      method: 'POST'
     }),
 
   createCandidate: (candidate: Candidate) =>
