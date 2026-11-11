@@ -19,6 +19,8 @@ Aplicación cliente Single Page Application (SPA) para la plataforma inteligente
   - [`docs/MANUAL_OPERATIVO_RECLUTADOR.pdf`](docs/MANUAL_OPERATIVO_RECLUTADOR.pdf) (Rol `RECRUITER`)
   - [`docs/MANUAL_OPERATIVO_MANAGER.pdf`](docs/MANUAL_OPERATIVO_MANAGER.pdf) (Rol `MANAGER`)
 - **Diagrama de Arquitectura Editable (Draw.io):** [`docs/diagrama_arquitectura.drawio`](docs/diagrama_arquitectura.drawio)
+- **Diagrama del Proyecto End-to-End (Draw.io):** [`docs/diagrama_proyecto.drawio`](docs/diagrama_proyecto.drawio)
+- **Documentación para DevOps (PDF):** [`docs/DOCUMENTACION_DEVOPS.pdf`](docs/DOCUMENTACION_DEVOPS.pdf) ([Fuente Markdown](docs/DOCUMENTACION_DEVOPS.md))
 
 ---
 
@@ -61,3 +63,4 @@ npm run build
 docker build -t talent-ia-frontend:2.0 .
 docker run -d -p 8080:80 --name eas-recruiting-frontend talent-ia-frontend:2.0
 ```
+
